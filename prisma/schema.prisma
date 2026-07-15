@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model addresses {
+  address_id      Int               @id @default(autoincrement())
+  customer_id     Int
+  street          String?           @db.VarChar(255)
+  city            String?           @db.VarChar(100)
+  state           String?           @db.VarChar(100)
+  zip_code        String?           @db.VarChar(20)
+  country         String?           @db.VarChar(100)
+  is_default      Boolean?          @default(false)
+  created_at      DateTime?         @default(now()) @db.Timestamp(0)
+  customers       customers         @relation(fields: [customer_id], references: [customer_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_addresses_customer")
+  order_addresses order_addresses[]
+
+  @@index([customer_id], map: "fk_addresses_customer")
+}
+
+model base_teas {
+  id            Int             @id @default(autoincrement())
+  name          String          @db.VarChar(100)
+  custom_blends custom_blends[]
+  custom_orders custom_orders[]
+}
+
+model batch {
+  batch_id       Int         @id @default(autoincrement())
+  factory_id     Int
+  field_id       Int
+  harvested_date DateTime?   @db.Date
+  factory        factory     @relation(fields: [factory_id], references: [factory_id], onUpdate: Restrict, map: "fk_batch_factory")
+  field          field       @relation(fields: [field_id], references: [field_id], onUpdate: Restrict, map: "fk_batch_field")
+  inventory      inventory[]
+  product        product[]
+
+  @@index([factory_id], map: "fk_batch_factory")
+  @@index([field_id], map: "fk_batch_field")
+}
+
+model blend_spices {
+  blend_id      Int
+  spice_id      Int
+  percentage    Decimal?      @db.Decimal(5, 2)
+  custom_blends custom_blends @relation(fields: [blend_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_bs_blend")
+  spices        spices        @relation(fields: [spice_id], references: [id], onUpdate: Restrict, map: "fk_bs_spice")
+
+  @@id([blend_id, spice_id])
+  @@index([spice_id], map: "fk_bs_spice")
+}
+
+model custom_blends {
+  id           Int            @id @default(autoincrement())
+  base_tea_id  Int
+  quantity     Int
+  created_at   DateTime?      @default(now()) @db.Timestamp(0)
+  blend_spices blend_spices[]
+  base_teas    base_teas      @relation(fields: [base_tea_id], references: [id], onUpdate: Restrict, map: "fk_blend_base_tea")
+
+  @@index([base_tea_id], map: "fk_blend_base_tea")
+}
+
+model custom_orders {
+  id           Int            @id @default(autoincrement())
+  base_tea_id  Int
+  quantity     Int
+  created_at   DateTime?      @db.DateTime(0)
+  base_teas    base_teas      @relation(fields: [base_tea_id], references: [id], onUpdate: Restrict, map: "fk_custom_order_base_tea")
+  order_spices order_spices[]
+
+  @@index([base_tea_id], map: "fk_custom_order_base_tea")
+}
+
+model customers {
+  customer_id    Int         @id @default(autoincrement())
+  first_name     String      @db.VarChar(100)
+  last_name      String?     @db.VarChar(100)
+  email          String?     @unique(map: "uq_customers_email") @db.VarChar(255)
+  password       String?     @db.VarChar(255)
+  contact_number String?     @db.VarChar(30)
+  created_at     DateTime?   @default(now()) @db.Timestamp(0)
+  updated_at     DateTime?   @default(now()) @db.Timestamp(0)
+  addresses      addresses[]
+  orders         orders[]
+}
+
+model factory {
+  factory_id   Int     @id @default(autoincrement())
+  factory_name String  @db.VarChar(150)
+  other_info   String? @db.Text
+  batch        batch[]
+}
+
+model field {
+  field_id          Int        @id @default(autoincrement())
+  plantation_id     Int
+  field_information String?    @db.Text
+  batch             batch[]
+  plantation        plantation @relation(fields: [plantation_id], references: [plantation_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_field_plantation")
+
+  @@index([plantation_id], map: "fk_field_plantation")
+}
+
+model inventory {
+  inventory_id Int      @id @default(autoincrement())
+  location_id  Int
+  batch_id     Int
+  quantity     Int      @default(0)
+  batch        batch    @relation(fields: [batch_id], references: [batch_id], onUpdate: Restrict, map: "fk_inventory_batch")
+  location     location @relation(fields: [location_id], references: [location_id], onUpdate: Restrict, map: "fk_inventory_location")
+
+  @@index([batch_id], map: "fk_inventory_batch")
+  @@index([location_id], map: "fk_inventory_location")
+}
+
+model location {
+  location_id   Int         @id @default(autoincrement())
+  location_name String      @db.VarChar(150)
+  other_info    String?     @db.Text
+  inventory     inventory[]
+}
+
+model order_addresses {
+  order_id   Int
+  address_id Int
+  addresses  addresses @relation(fields: [address_id], references: [address_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_oa_address")
+  orders     orders    @relation(fields: [order_id], references: [order_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_oa_order")
+
+  @@id([order_id, address_id])
+  @@index([address_id], map: "fk_oa_address")
+}
+
+model order_spices {
+  id            Int           @id @default(autoincrement())
+  order_id      Int
+  spice_name    String?       @db.VarChar(100)
+  percentage    Decimal?      @db.Decimal(5, 2)
+  custom_orders custom_orders @relation(fields: [order_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_order_spices_order")
+
+  @@index([order_id], map: "fk_order_spices_order")
+}
+
+model orders {
+  order_id        Int               @id @default(autoincrement())
+  customer_id     Int
+  order_time      DateTime?         @db.DateTime(0)
+  quantity        Int?
+  total           Decimal?          @db.Decimal(10, 2)
+  created_at      DateTime?         @default(now()) @db.Timestamp(0)
+  order_addresses order_addresses[]
+  customers       customers         @relation(fields: [customer_id], references: [customer_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_orders_customer")
+
+  @@index([customer_id], map: "fk_orders_customer")
+}
+
+model paid_carts {
+  cart_token String    @id @db.VarChar(255)
+  paid_at    DateTime? @default(now()) @db.Timestamp(0)
+}
+
+model plantation {
+  plantation_id   Int     @id @default(autoincrement())
+  plantation_name String  @db.VarChar(150)
+  tea_grade       String? @db.VarChar(100)
+  field           field[]
+}
+
+model product {
+  traceability_id Int     @id @default(autoincrement())
+  batch_id        Int
+  quantity        Int?
+  product_name    String? @db.VarChar(150)
+  batch           batch   @relation(fields: [batch_id], references: [batch_id], onUpdate: Restrict, map: "fk_product_batch")
+
+  @@index([batch_id], map: "fk_product_batch")
+}
+
+model product_variants {
+  shopify_variant_id     BigInt                 @id
+  shopify_product_id     BigInt
+  variant_title          String?                @db.VarChar(255)
+  variant_price          Decimal?               @db.Decimal(10, 2)
+  variant_weight         Decimal?               @db.Decimal(10, 2)
+  variant_image_src      String?                @db.VarChar(1024)
+  shopify_store_products shopify_store_products @relation(fields: [shopify_product_id], references: [shopify_product_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_variant_product")
+
+  @@index([shopify_product_id], map: "fk_variant_product")
+}
+
+model shopify_products {
+  shopify_variant_id BigInt   @id
+  shopify_product_id BigInt
+  title              String?  @db.VarChar(512)
+  description        String?  @db.MediumText
+  vendor             String?  @db.VarChar(255)
+  product_type       String?  @db.VarChar(255)
+  price              Decimal? @db.Decimal(10, 2)
+  image_src          String?  @db.VarChar(1024)
+}
+
+model shopify_store_products {
+  shopify_product_id BigInt             @id
+  title              String?            @db.VarChar(512)
+  description        String?            @db.MediumText
+  vendor             String?            @db.VarChar(255)
+  product_type       String?            @db.VarChar(255)
+  image_src          String?            @db.VarChar(1024)
+  created_at         DateTime?          @default(now()) @db.Timestamp(0)
+  updated_at         DateTime?          @default(now()) @db.Timestamp(0)
+  product_variants   product_variants[]
+}
+
+model spices {
+  id           Int            @id @default(autoincrement())
+  name         String         @db.VarChar(100)
+  blend_spices blend_spices[]
+}
+
+model tea_products {
+  id            Int       @id @default(autoincrement())
+  name          String    @db.VarChar(150)
+  category      String    @db.VarChar(100)
+  price         Decimal   @db.Decimal(10, 2)
+  originalPrice Decimal?  @default(0.00) @db.Decimal(10, 2)
+  imageSrc      String?   @default("") @db.VarChar(512)
+  tagline       String?   @default("") @db.VarChar(255)
+  rating        Decimal?  @default(0.00) @db.Decimal(3, 2)
+  reviewsCount  Int?      @default(0)
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+}

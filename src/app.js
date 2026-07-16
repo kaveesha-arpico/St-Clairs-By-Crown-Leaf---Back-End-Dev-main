@@ -57,6 +57,7 @@ const teaProductRoutes = require("./routes/teaProductsRoutes"); // Tea products 
 const teaOptionsRoutes = require("./routes/teaBlendRoutes"); // Tea options routes
 const shopifyRoutes = require("./routes/shopifyRoutes");
 const shopifyOrderRoutes = require("./routes/shopifyOrderRoutes"); // Shopify order routes
+const storefrontRoutes = require("./routes/storefrontRoutes"); // Storefront GraphQL catalog
 
 //Middleware to parse JSON bodies. Capture the raw body so the Shopify
 //webhook route can verify its HMAC signature against the exact bytes.
@@ -74,6 +75,7 @@ app.use("/api", teaProductRoutes); // Storefront tea products
 app.use("/api", teaOptionsRoutes); // Storefront tea options / custom blends
 app.use("/api", shopifyRoutes); // Storefront checkout, product listing, webhook, cart-status
 app.use("/api", shopifyOrderRoutes); // Shopify order listing
+app.use("/api", storefrontRoutes); // Storefront GraphQL catalog (products)
 
 // ---- AUTH GATE: every /api route below this line requires a valid JWT ----
 app.use("/api", protect);

@@ -5,7 +5,7 @@
 // Rules mirror the columns each controller actually writes, so invalid input is
 // rejected with a clear 400 before it ever reaches the database.
 
-const { body, param } = require("express-validator");
+const { body, param, query } = require("express-validator");
 
 // Validates the numeric :id route parameter used by getById/update/delete.
 const idParam = [
@@ -208,6 +208,37 @@ const shopify = {
   ],
 };
 
+// ---- Storefront cart ----
+// Cart/line ids are Shopify GIDs (opaque strings), so they're checked for
+// presence only — never parsed or reformatted.
+const storefrontCart = {
+  create: [
+    body("items").optional().isArray().withMessage("items must be an array"),
+    body("items.*.variantId").notEmpty().withMessage("each item needs a variantId"),
+    body("items.*.quantity").isInt({ min: 1 }).withMessage("each item quantity must be a positive integer"),
+  ],
+  get: [
+    query("id").notEmpty().withMessage("id (cart) is required"),
+  ],
+  addLines: [
+    body("cartId").notEmpty().withMessage("cartId is required"),
+    body("items").isArray({ min: 1 }).withMessage("items must be a non-empty array"),
+    body("items.*.variantId").notEmpty().withMessage("each item needs a variantId"),
+    body("items.*.quantity").isInt({ min: 1 }).withMessage("each item quantity must be a positive integer"),
+  ],
+  updateLines: [
+    body("cartId").notEmpty().withMessage("cartId is required"),
+    body("lines").isArray({ min: 1 }).withMessage("lines must be a non-empty array"),
+    body("lines.*.id").notEmpty().withMessage("each line needs an id"),
+    body("lines.*.quantity").isInt({ min: 0 }).withMessage("each line quantity must be 0 or more"),
+  ],
+  removeLines: [
+    body("cartId").notEmpty().withMessage("cartId is required"),
+    body("lineIds").isArray({ min: 1 }).withMessage("lineIds must be a non-empty array"),
+    body("lineIds.*").notEmpty().withMessage("each lineId must be non-empty"),
+  ],
+};
+
 module.exports = {
   idParam,
   auth,
@@ -224,4 +255,5 @@ module.exports = {
   product,
   teaBlend,
   shopify,
+  storefrontCart,
 };

@@ -129,6 +129,8 @@ All routes are prefixed with `/api`. Admin resources follow standard CRUD:
 | Supply chain | CRUD on `/plantation`, `/field`, `/factory`, `/batch`, `/inventory`, `/location`, `/product` |
 | Tea blends | `GET /tea-options`, `POST /create-custom-blend` |
 | Tea products | `POST /tea-product-create`, `GET /get-tea-products`, `GET /get-tea-shopify-products`, `GET /get-tea-shopify-products-variants` |
+| Storefront catalog | `GET /storefront/products` |
+| Storefront cart | `POST /storefront/cart`, `GET /storefront/cart?id=`, `POST /storefront/cart/lines`, `PATCH /storefront/cart/lines`, `DELETE /storefront/cart/lines` |
 | Shopify | `POST /checkout`, `POST /create-shopify-product`, `GET /get-shopify-store-products`, `GET /get-shopify-products`, `GET /get-order-list`, `POST /payment-webhook`, `GET /cart-status/:cartId`, `GET /get-all-orders` |
 
 ## Project structure
@@ -153,6 +155,25 @@ prisma.config.ts       # Prisma CLI config (loads DATABASE_URL, seed command)
 tests/
   smoke.test.js        # Middleware-level smoke tests
 ```
+
+## Shopify storefront (Storefront GraphQL API)
+
+`src/lib/shopifyStorefront.js` is the shared client for all buyer-facing Shopify
+reads and cart operations. Two things are easy to get wrong here:
+
+- **Token/header pairing.** The Headless channel issues a *private* token (for
+  server-side use, sent as `Shopify-Storefront-Private-Token`) and a *public*
+  token (for browsers, sent as `X-Shopify-Storefront-Access-Token`). This backend
+  uses the **private** token. Sending it in the public header returns `401`.
+- **Shopify owns prices.** Cart totals, availability and line costs all come from
+  Shopify. Neither the frontend nor this backend should calculate money.
+
+Cart and variant IDs are Shopify GIDs — opaque strings that must be passed back
+verbatim. The cart GID contains a `?key=...` component, so it travels as a query
+parameter or body field, never as a URL path segment, and must never be split.
+
+Variant IDs supplied by a client are validated against Shopify (exists +
+`availableForSale`) before any cart is created or modified.
 
 ## Notes
 

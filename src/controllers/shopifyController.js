@@ -2,6 +2,10 @@ const Shopify = require("shopify-api-node");
 const fs = require("fs");
 const path = require("path");
 const prisma = require("../config/prisma");
+const {
+  storefrontGraphQL,
+  validateVariants,
+} = require("../lib/shopifyStorefront");
 
 require("dotenv").config();
 
@@ -163,67 +167,69 @@ const getProducts = async (req, res) => {
 };
 
 /*.......SHOPIFY CHECKOUT------*/
+
+const CART_CREATE_MUTATION = `
+  mutation cartCreate($input: CartInput!) {
+    cartCreate(input: $input) {
+      cart {
+        id
+        checkoutUrl
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
 const checkout = async (req, res) => {
   const { items } = req.body;
 
+  // Keep merchandiseId (variant GID) as the exact string the client sent.
   const lineItems = items.map((item) => ({
     merchandiseId: item.variantId,
     quantity: item.quantity,
   }));
 
-  const mutation = `
-    mutation cartCreate($input: CartInput!) {
-      cartCreate(input: $input) {
-        cart {
-          id
-          checkoutUrl
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-  `;
-
-  const variables = {
-    input: {
-      lines: lineItems,
-    },
-  };
-
   try {
-    const response = await fetch(
-      `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-01/graphql.json`,
-      {
-        method: "POST",
-        headers: {
-          "X-Shopify-Storefront-Access-Token":
-            process.env.SHOPIFY_STOREFRONT_TOKEN,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: mutation,
-          variables: variables,
-        }),
-      }
+    // 1) Validate the variants against Shopify. This stops a client from
+    //    checking out a variant that doesn't exist or is sold out — the
+    //    frontend must not be the only thing deciding what's purchasable.
+    const { invalid, unavailable } = await validateVariants(
+      lineItems.map((l) => l.merchandiseId),
+      { buyerIp: req.ip }
     );
 
-    const data = await response.json();
-    console.log(data);
-
-    if (data.data.cartCreate.cart?.checkoutUrl) {
-      res.status(200).json({
-        url: data.data.cartCreate.cart.checkoutUrl,
-        cartId: data.data.cartCreate.cart.id,
+    if (invalid.length > 0 || unavailable.length > 0) {
+      return res.status(400).json({
+        error: "One or more items are invalid or unavailable.",
+        invalid,
+        unavailable,
       });
-    } else {
-      console.error("GraphQL UserErrors:", data.data.cartCreate.userErrors);
-      res.status(400).json({ error: data.data.cartCreate.userErrors });
     }
+
+    // 2) Create the Shopify cart and hand back its hosted checkout URL.
+    const data = await storefrontGraphQL(
+      CART_CREATE_MUTATION,
+      { input: { lines: lineItems } },
+      { buyerIp: req.ip }
+    );
+
+    const result = data.cartCreate;
+
+    if (result.cart?.checkoutUrl) {
+      return res.status(200).json({
+        url: result.cart.checkoutUrl,
+        cartId: result.cart.id,
+      });
+    }
+
+    console.error("GraphQL UserErrors:", result.userErrors);
+    return res.status(400).json({ error: result.userErrors });
   } catch (err) {
-    console.error("Catch Block Error:", err);
-    res.status(500).json({ error: "Checkout creation failed" });
+    console.error("Catch Block Error:", err.message);
+    return res.status(500).json({ error: "Checkout creation failed" });
   }
 };
 

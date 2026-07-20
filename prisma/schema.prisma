@@ -233,3 +233,61 @@ model tea_products {
   reviewsCount  Int?      @default(0)
   created_at    DateTime? @default(now()) @db.Timestamp(0)
 }
+
+// Idempotency log for Shopify webhooks. Shopify may deliver the same event more
+// than once, so every delivery is recorded by its X-Shopify-Webhook-Id and a
+// repeat delivery is acknowledged without being processed again.
+model shopify_webhook_events {
+  webhook_id    String    @id @db.VarChar(255)
+  topic         String    @db.VarChar(100)
+  shop_domain   String?   @db.VarChar(255)
+  status        String    @default("received") @db.VarChar(20)
+  error_message String?   @db.Text
+  received_at   DateTime? @default(now()) @db.Timestamp(0)
+  processed_at  DateTime? @db.Timestamp(0)
+
+  @@index([topic], map: "idx_webhook_events_topic")
+}
+
+// Orders as they exist in Shopify (Shopify remains the source of truth for
+// money and status). Kept separate from the internal `orders` table, which
+// models our own supply-chain orders.
+model shopify_orders {
+  shopify_order_id   BigInt                     @id
+  order_number       String?                    @db.VarChar(50)
+  email              String?                    @db.VarChar(255)
+  financial_status   String?                    @db.VarChar(50)
+  fulfillment_status String?                    @db.VarChar(50)
+  currency           String?                    @db.VarChar(10)
+  subtotal_amount    Decimal?                   @db.Decimal(10, 2)
+  total_amount       Decimal?                   @db.Decimal(10, 2)
+  cart_token         String?                    @db.VarChar(255)
+  shopify_created_at DateTime?                  @db.DateTime(0)
+  created_at         DateTime?                  @default(now()) @db.Timestamp(0)
+  updated_at         DateTime?                  @updatedAt @db.Timestamp(0)
+  line_items         shopify_order_line_items[]
+
+  @@index([email], map: "idx_shopify_orders_email")
+  @@index([cart_token], map: "idx_shopify_orders_cart_token")
+}
+
+// Line items of a Shopify order. `properties` holds the cart-line attributes
+// Shopify passes through (used for custom-blend details) as a JSON string —
+// stored as TEXT rather than a JSON column to avoid MariaDB/Prisma JSON quirks.
+model shopify_order_line_items {
+  line_item_id     BigInt         @id
+  shopify_order_id BigInt
+  product_id       BigInt?
+  variant_id       BigInt?
+  title            String?        @db.VarChar(255)
+  variant_title    String?        @db.VarChar(255)
+  sku              String?        @db.VarChar(100)
+  quantity         Int
+  price            Decimal?       @db.Decimal(10, 2)
+  blend_id         String?        @db.VarChar(100)
+  properties       String?        @db.Text
+  order            shopify_orders @relation(fields: [shopify_order_id], references: [shopify_order_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_line_items_shopify_order")
+
+  @@index([shopify_order_id], map: "fk_line_items_shopify_order")
+  @@index([blend_id], map: "idx_line_items_blend_id")
+}

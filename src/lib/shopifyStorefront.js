@@ -66,4 +66,46 @@ async function storefrontGraphQL(query, variables = {}, opts = {}) {
   return payload.data;
 }
 
-module.exports = { storefrontGraphQL, API_VERSION };
+// Confirm each variant GID exists and is purchasable. `nodes` returns entries in
+// the requested order with null for ids that don't resolve; the ProductVariant
+// fragment only populates for real variants.
+const VALIDATE_VARIANTS_QUERY = `
+  query ValidateVariants($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on ProductVariant {
+        id
+        availableForSale
+      }
+    }
+  }
+`;
+
+/**
+ * Check variant GIDs against Shopify before letting them into a cart.
+ * The frontend must not be the only thing deciding what's purchasable.
+ * @param {string[]} ids - variant GIDs (duplicates are fine).
+ * @param {object} [opts] - forwarded to storefrontGraphQL (e.g. { buyerIp }).
+ * @returns {Promise<{invalid: string[], unavailable: string[]}>}
+ */
+async function validateVariants(ids, opts = {}) {
+  const uniqueIds = [...new Set(ids)];
+  if (uniqueIds.length === 0) return { invalid: [], unavailable: [] };
+
+  const data = await storefrontGraphQL(
+    VALIDATE_VARIANTS_QUERY,
+    { ids: uniqueIds },
+    opts
+  );
+
+  const availability = new Map();
+  for (const node of data.nodes || []) {
+    if (node && node.id) availability.set(node.id, node.availableForSale);
+  }
+
+  return {
+    invalid: uniqueIds.filter((id) => !availability.has(id)),
+    unavailable: uniqueIds.filter((id) => availability.get(id) === false),
+  };
+}
+
+module.exports = { storefrontGraphQL, validateVariants, API_VERSION };

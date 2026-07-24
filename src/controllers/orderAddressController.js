@@ -7,6 +7,9 @@ exports.addOrderAddress = async (req, res) => {
     await prisma.order_addresses.create({ data: { order_id, address_id } });
     res.status(201).json({ message: 'Address linked to order successfully' });
   } catch (error) {
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid order_id or address_id: a referenced record does not exist.' });
+    }
     console.error(error);
     res.status(500).json({ error: 'Error linking address to order' });
   }

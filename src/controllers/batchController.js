@@ -14,6 +14,9 @@ exports.createBatch = async (req, res) => {
     });
     res.status(201).json({ batch_id: created.batch_id, factory_id, field_id, harvested_date });
   } catch (error) {
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid factory_id or field_id: a referenced record does not exist.' });
+    }
     console.error(error);
     res.status(500).json({ error: 'Error creating batch' });
   }
@@ -62,6 +65,9 @@ exports.updateBatch = async (req, res) => {
   } catch (error) {
     if (error.code === 'P2025') {
       return res.status(404).json({ error: 'Batch not found' });
+    }
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid factory_id or field_id: a referenced record does not exist.' });
     }
     console.error(error);
     res.status(500).json({ error: 'Error updating batch' });

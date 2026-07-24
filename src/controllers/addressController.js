@@ -19,6 +19,9 @@ exports.createAddress = async (req, res) => {
     });
     res.status(201).json({ address_id: created.address_id, customer_id, street, city });
   } catch (error) {
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid customer_id: the referenced customer does not exist.' });
+    }
     console.error(error);
     res.status(500).json({ error: 'Error creating address' });
   }

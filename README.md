@@ -127,7 +127,7 @@ All routes are prefixed with `/api`. Admin resources follow standard CRUD:
 | Orders | CRUD on `/orders` |
 | Order↔Address | `POST /order-addresses`, `GET /order-addresses/:orderId`, `DELETE /order-addresses/:orderId/:addressId` |
 | Supply chain | CRUD on `/plantation`, `/field`, `/factory`, `/batch`, `/inventory`, `/location`, `/product` |
-| Tea blends | `GET /tea-options`, `POST /create-custom-blend` |
+| Tea blends | `GET /tea-options`, `POST /create-custom-blend`, `GET /custom-blends/:ref` |
 | Tea products | `POST /tea-product-create`, `GET /get-tea-products`, `GET /get-tea-shopify-products`, `GET /get-tea-shopify-products-variants` |
 | Storefront catalog | `GET /storefront/products` |
 | Storefront cart | `POST /storefront/cart`, `GET /storefront/cart?id=`, `POST /storefront/cart/lines`, `PATCH /storefront/cart/lines`, `DELETE /storefront/cart/lines` |
@@ -174,6 +174,24 @@ parameter or body field, never as a URL path segment, and must never be split.
 
 Variant IDs supplied by a client are validated against Shopify (exists +
 `availableForSale`) before any cart is created or modified.
+
+## Custom blends → Shopify
+
+A custom blend is saved as a recipe (`custom_blends` + `blend_spices`) and given a
+traceable reference `BLEND-<year>-<6-digit id>` derived from its numeric id — no
+extra column needed, and the reference always reverses back to one recipe.
+
+`POST /create-custom-blend` returns `lineAttributes` — a `[{key, value}]` list
+(Blend ID, Base Tea, Ingredients). The frontend attaches these to a Shopify cart
+line (`POST /storefront/cart/lines`), Shopify carries them through checkout onto
+the order, and the order webhook (`orders/paid`) reads the **Blend ID** back off
+each line. Fulfillment then turns that reference into a full recipe via
+`GET /custom-blends/:ref`. Pricing is a flat per-variant price on the single
+"Custom Blend Tea" product — Shopify owns it; the backend never prices a blend.
+
+> Open item: the "Custom Blend Tea" variants are currently by estate, while the
+> DB base teas are by type. Which variant a blend maps to is a frontend/product
+> decision that is deliberately not hard-coded here yet.
 
 ## Notes
 

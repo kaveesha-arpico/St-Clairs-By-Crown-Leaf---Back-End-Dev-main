@@ -10,6 +10,9 @@ exports.createInventory = async (req, res) => {
     });
     res.status(201).json({ inventory_id: created.inventory_id, location_id, batch_id, quantity });
   } catch (error) {
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid location_id or batch_id: a referenced record does not exist.' });
+    }
     console.error(error);
     res.status(500).json({ error: 'Error creating inventory' });
   }
@@ -54,6 +57,9 @@ exports.updateInventory = async (req, res) => {
   } catch (error) {
     if (error.code === 'P2025') {
       return res.status(404).json({ error: 'Inventory record not found' });
+    }
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid location_id or batch_id: a referenced record does not exist.' });
     }
     console.error(error);
     res.status(500).json({ error: 'Error updating inventory' });

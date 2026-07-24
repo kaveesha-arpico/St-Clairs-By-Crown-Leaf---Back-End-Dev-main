@@ -1,11 +1,11 @@
 const Shopify = require("shopify-api-node");
-const { SHOPIFY_STORE_DOMAIN, SHOPIFY_API_KEY, SHOPIFY_API_PASSWORD } =
-  process.env;
+
+// Uses the custom app's Admin API access token (see shopifyController.js note).
+const { SHOPIFY_STORE_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN } = process.env;
 
 const shopify = new Shopify({
   shopName: SHOPIFY_STORE_DOMAIN,
-  apiKey: SHOPIFY_API_KEY,
-  password: SHOPIFY_API_PASSWORD,
+  accessToken: SHOPIFY_ADMIN_ACCESS_TOKEN,
 });
 
 /*.......RETRIVE ALL ORDERS FROM SHOPIFY STORE------*/

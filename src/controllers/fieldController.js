@@ -12,6 +12,9 @@ exports.createField = async (req, res) => {
     });
     res.status(201).json({ field_id: created.field_id, plantation_id, field_information });
   } catch (error) {
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid plantation_id: the referenced plantation does not exist.' });
+    }
     console.error(error);
     res.status(500).json({ error: 'Error creating field' });
   }
@@ -56,6 +59,9 @@ exports.updateField = async (req, res) => {
   } catch (error) {
     if (error.code === 'P2025') {
       return res.status(404).json({ error: 'Field not found' });
+    }
+    if (error.code === 'P2003') {
+      return res.status(400).json({ error: 'Invalid plantation_id: the referenced plantation does not exist.' });
     }
     console.error(error);
     res.status(500).json({ error: 'Error updating field' });

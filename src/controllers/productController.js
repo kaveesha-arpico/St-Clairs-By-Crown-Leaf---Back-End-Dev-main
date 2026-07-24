@@ -15,6 +15,9 @@ exports.createProduct = async (req, res) => {
       product_name,
     });
   } catch (error) {
+    if (error.code === "P2003") {
+      return res.status(400).json({ error: "Invalid batch_id: the referenced batch does not exist." });
+    }
     console.error(error);
     res.status(500).json({ error: "Error creating product" });
   }
@@ -59,6 +62,9 @@ exports.updateProduct = async (req, res) => {
   } catch (error) {
     if (error.code === "P2025") {
       return res.status(404).json({ error: "Product not found" });
+    }
+    if (error.code === "P2003") {
+      return res.status(400).json({ error: "Invalid batch_id: the referenced batch does not exist." });
     }
     console.error(error);
     res.status(500).json({ error: "Error updating product" });

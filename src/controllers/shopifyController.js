@@ -12,13 +12,14 @@ require("dotenv").config();
 // How long a confirmed-paid cart token stays valid for the frontend to observe.
 const PAID_CART_TTL_MINUTES = 15;
 
-const { SHOPIFY_STORE_DOMAIN, SHOPIFY_API_KEY, SHOPIFY_API_PASSWORD } =
-  process.env;
+// Authenticate the legacy REST client with the custom app's Admin API access
+// token (the apiKey/password "private app" model Shopify retired). Modern GraphQL
+// work uses src/lib/shopifyAdmin.js; this keeps the remaining REST calls working.
+const { SHOPIFY_STORE_DOMAIN, SHOPIFY_ADMIN_ACCESS_TOKEN } = process.env;
 
 const shopify = new Shopify({
   shopName: SHOPIFY_STORE_DOMAIN,
-  apiKey: SHOPIFY_API_KEY,
-  password: SHOPIFY_API_PASSWORD,
+  accessToken: SHOPIFY_ADMIN_ACCESS_TOKEN,
 });
 
 

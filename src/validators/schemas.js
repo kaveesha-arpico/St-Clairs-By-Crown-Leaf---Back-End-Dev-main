@@ -197,6 +197,9 @@ const teaBlend = {
     body("spices.*.id").isInt({ min: 1 }).withMessage("each spice.id must be a positive integer"),
     body("spices.*.percentage").isFloat({ min: 0, max: 100 }).withMessage("each spice.percentage must be 0-100"),
   ],
+  getCustomBlend: [
+    param("ref").notEmpty().withMessage("blend reference is required"),
+  ],
 };
 
 // ---- Shopify checkout ----

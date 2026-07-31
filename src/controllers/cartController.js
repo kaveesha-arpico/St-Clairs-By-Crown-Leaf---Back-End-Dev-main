@@ -98,6 +98,16 @@ const CART_LINES_REMOVE = `
   }
 `;
 
+const CART_BUYER_IDENTITY_UPDATE = `
+  ${CART_FIELDS}
+  mutation CartBuyerIdentityUpdate($cartId: ID!, $buyerIdentity: CartBuyerIdentityInput!) {
+    cartBuyerIdentityUpdate(cartId: $cartId, buyerIdentity: $buyerIdentity) {
+      cart { ...CartFields }
+      userErrors { field message }
+    }
+  }
+`;
+
 // Flatten Shopify's edges/node envelope into a frontend-friendly cart.
 function shapeCart(cart) {
   if (!cart) return null;
@@ -254,10 +264,61 @@ const removeCartLines = async (req, res) => {
   );
 };
 
+// POST /api/storefront/cart/buyer-identity — attach the signed-in customer's
+// identity to their Shopify cart so the hosted checkout opens prefilled.
+// The email is taken from the authenticated token, NEVER the request body, so a
+// client can't set an arbitrary identity. Email-only for now (the highest-value
+// field); address prefill can be added later via deliveryAddressPreferences.
+const updateCartBuyerIdentity = async (req, res) => {
+  const { cartId } = req.body;
+  const email = req.user && req.user.email;
+
+  if (!email) {
+    return res
+      .status(401)
+      .json({ success: false, message: "Authentication required." });
+  }
+
+  const data = await storefrontGraphQL(
+    CART_BUYER_IDENTITY_UPDATE,
+    { cartId, buyerIdentity: { email } },
+    { buyerIp: req.ip }
+  );
+
+  const result = data.cartBuyerIdentityUpdate;
+  const errors = result.userErrors || [];
+
+  // Shopify quirk: for an unknown cart it still returns a (bogus) cart object
+  // AND a userError on the `cartId` field — so we can't rely on a null cart.
+  // A cartId error => the cart is unknown/expired (404, matching GET /cart);
+  // any other userError is a validation problem (400).
+  if (errors.length > 0) {
+    const cartError = errors.some(
+      (e) => Array.isArray(e.field) && e.field.includes("cartId")
+    );
+    return res.status(cartError ? 404 : 400).json({
+      success: false,
+      message: cartError
+        ? "Cart not found or expired."
+        : "Failed to update buyer identity.",
+      errors,
+    });
+  }
+
+  if (!result.cart) {
+    return res
+      .status(404)
+      .json({ success: false, message: "Cart not found or expired." });
+  }
+
+  return res.status(200).json({ success: true, cart: shapeCart(result.cart) });
+};
+
 module.exports = {
   createCart,
   getCart,
   addCartLines,
   updateCartLines,
   removeCartLines,
+  updateCartBuyerIdentity,
 };

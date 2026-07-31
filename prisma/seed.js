@@ -8,13 +8,15 @@
 
 const prisma = require("../src/config/prisma");
 
+// The "base tea" options are the tea estates the blend builder offers, matching
+// the estates set up as Custom Blend Tea variants in Shopify. (The table is
+// still named base_teas; the values are estates.)
 const BASE_TEAS = [
-  "Black Tea",
-  "Green Tea",
-  "Oolong Tea",
-  "White Tea",
-  "Rooibos",
-  "Pu-erh",
+  "Lakshapana",
+  "Maskeliya",
+  "Moray",
+  "Glentilt",
+  "Strathpey",
 ];
 
 const SPICES = [

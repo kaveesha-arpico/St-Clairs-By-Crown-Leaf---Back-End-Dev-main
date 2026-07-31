@@ -1,13 +1,9 @@
 // storefrontController.js
-// Read-only, public-facing catalog endpoints backed by the Storefront GraphQL
-// API. These return live Shopify data (prices, availability, variant GIDs) so
-// the frontend never has to guess or calculate prices locally.
+
 
 const { storefrontGraphQL } = require("../lib/shopifyStorefront");
 
-// Product list query. Variant GIDs (e.g. gid://shopify/ProductVariant/123) are
-// returned as-is — they must stay strings and be passed back verbatim to the
-// cart, never parsed into numbers or rebuilt.
+
 const PRODUCTS_QUERY = `
   query Products($first: Int!, $variants: Int!) {
     products(first: $first) {

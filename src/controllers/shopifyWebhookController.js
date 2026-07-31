@@ -10,6 +10,7 @@
 //     silently dropping the event.
 
 const prisma = require("../config/prisma");
+const { normalizeCartToken } = require("../lib/cartToken");
 
 // Cart-line attributes arrive as [{ name, value }]. Pull out the blend id so
 // production can trace a custom blend back to its recipe.
@@ -157,12 +158,14 @@ const ordersPaid = makeWebhookHandler("orders/paid", async (payload) => {
   await persistOrder(payload);
 
   // Keep the existing cart-status flow working: the storefront polls
-  // /api/cart-status/:cartId to learn a cart was paid for.
-  if (payload.cart_token) {
+  // /api/cart-status/:cartId to learn a cart was paid for. Store the canonical
+  // bare token so it matches what the storefront polls with.
+  const cartToken = normalizeCartToken(payload.cart_token);
+  if (cartToken) {
     await prisma.paid_carts.upsert({
-      where: { cart_token: payload.cart_token },
+      where: { cart_token: cartToken },
       update: { paid_at: new Date() },
-      create: { cart_token: payload.cart_token },
+      create: { cart_token: cartToken },
     });
   }
 });

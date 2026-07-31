@@ -6,9 +6,11 @@ const {
   addCartLines,
   updateCartLines,
   removeCartLines,
+  updateCartBuyerIdentity,
 } = require("../controllers/cartController");
 const asyncHandler = require("../middleware/asyncHandler");
 const validate = require("../middleware/validate");
+const { protect } = require("../middleware/authMiddleware");
 const { storefrontCart } = require("../validators/schemas");
 
 const router = express.Router();
@@ -43,6 +45,15 @@ router.delete(
   "/storefront/cart/lines",
   validate(storefrontCart.removeLines),
   asyncHandler(removeCartLines)
+);
+
+// The one shop-flow route that requires auth: attach the signed-in customer's
+// identity to their cart (identity is read from the JWT, not the body).
+router.post(
+  "/storefront/cart/buyer-identity",
+  protect,
+  validate(storefrontCart.buyerIdentity),
+  asyncHandler(updateCartBuyerIdentity)
 );
 
 module.exports = router;

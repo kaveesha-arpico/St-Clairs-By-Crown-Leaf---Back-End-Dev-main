@@ -6,6 +6,7 @@ const {
   storefrontGraphQL,
   validateVariants,
 } = require("../lib/shopifyStorefront");
+const { normalizeCartToken } = require("../lib/cartToken");
 
 require("dotenv").config();
 
@@ -259,7 +260,8 @@ const getOrderDetails = async (req, res) => {
 /*.......ORDER CONFIRM WITH WEBHOOK------*/
 const paymentWebhookHandler = async (req, res) => {
   const orderData = req.body;
-  const paidCartToken = orderData.cart_token;
+  // Store the canonical bare token so it matches what the storefront polls with.
+  const paidCartToken = normalizeCartToken(orderData.cart_token);
 
   if (paidCartToken) {
     try {
@@ -283,7 +285,9 @@ const paymentWebhookHandler = async (req, res) => {
 };
 
 const getCartPaymentStatus = async (req, res) => {
-  const { cartId } = req.params;
+  // The client may send a full/URL-encoded cart GID; reduce it to the same bare
+  // token the webhook stored so the two always match.
+  const cartId = normalizeCartToken(req.params.cartId);
 
   try {
     // Prune expired tokens so stale confirmations never fire.

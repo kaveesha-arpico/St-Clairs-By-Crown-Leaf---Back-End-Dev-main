@@ -240,6 +240,9 @@ const storefrontCart = {
     body("lineIds").isArray({ min: 1 }).withMessage("lineIds must be a non-empty array"),
     body("lineIds.*").notEmpty().withMessage("each lineId must be non-empty"),
   ],
+  buyerIdentity: [
+    body("cartId").notEmpty().withMessage("cartId is required"),
+  ],
 };
 
 module.exports = {

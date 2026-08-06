@@ -51,9 +51,11 @@ See [`.env.example`](.env.example) for the full list. Summary:
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | yes | DB connection (used by the Prisma runtime adapter) |
 | `DATABASE_URL` | yes (for Prisma CLI) | Connection string used by `prisma migrate` / `db pull` |
 | `JWT_SECRET` / `JWT_EXPIRES_IN` | yes | Token signing |
-| `SHOPIFY_STORE_DOMAIN` / `SHOPIFY_API_KEY` / `SHOPIFY_API_PASSWORD` | yes | Shopify Admin API |
-| `SHOPIFY_STOREFRONT_TOKEN` / `SHOPIFY_STOREFRONT_ACCESS_TOKEN` | yes | Shopify Storefront API |
-| `SHOPIFY_WEBHOOK_SECRET` | for webhooks | HMAC verification of `/api/payment-webhook` |
+| `SHOPIFY_STORE_DOMAIN` | yes | `your-store.myshopify.com` |
+| `SHOPIFY_API_VERSION` | yes | GraphQL API version, e.g. `2025-07` |
+| `SHOPIFY_ADMIN_ACCESS_TOKEN` | yes | Admin API token (`shpat_…`), server-only |
+| `SHOPIFY_STOREFRONT_TOKEN` | yes | **Private** Storefront token (Headless channel), server-only |
+| `SHOPIFY_WEBHOOK_SECRET` | for webhooks | HMAC verification of Shopify webhooks |
 
 ## Database & Prisma
 
@@ -146,7 +148,10 @@ src/
   routes/              # Route definitions (validation + async wrapping)
   middleware/          # auth, validation, rate limiting, webhook HMAC, asyncHandler
   validators/schemas.js# express-validator rule sets
-  lib/shopify.js       # shopify-buy storefront client
+  lib/
+    shopifyStorefront.js # Storefront GraphQL client (buyer-facing reads + cart)
+    shopifyAdmin.js      # Admin GraphQL client
+    cartToken.js         # Normalizes any cart id/gid to its canonical token
 prisma/
   schema.prisma        # Source of truth for the data model (22 models)
   migrations/          # Versioned schema history (0_init = baseline)

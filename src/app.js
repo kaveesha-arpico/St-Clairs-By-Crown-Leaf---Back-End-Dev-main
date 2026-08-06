@@ -4,15 +4,23 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 
 const { protect } = require("./middleware/authMiddleware");
+const { apiLimiter } = require("./middleware/rateLimiter");
+const prisma = require("./config/prisma");
 
 const app = express();
+
+// Behind a reverse proxy / load balancer (AWS ALB, nginx), trust the first hop
+// so req.ip reflects the real client. Rate limiting and Shopify's buyerIp both
+// depend on this; without it every client looks like the proxy's IP.
+app.set("trust proxy", 1);
 
 // Security headers.
 app.use(helmet());
 
-// Request logging (skip noise during tests).
+// Request logging. Verbose "combined" (with client IPs/timestamps) in
+// production; concise "dev" locally; silent under test.
 if (process.env.NODE_ENV !== "test") {
-  app.use(morgan("dev"));
+  app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 }
 
 // Allowed CORS origins come from FRONTEND_URL (comma-separated).
@@ -39,6 +47,18 @@ const corsOptions = {
   credentials: true,
 };
 app.use(cors(corsOptions));
+
+// Health check for load balancers / uptime monitors. Kept above the rate
+// limiter so frequent polling is never throttled. Pings the DB so a failed
+// connection surfaces as 503 (unhealthy) rather than a false "ok".
+app.get("/health", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.status(200).json({ status: "ok", db: "up" });
+  } catch (err) {
+    return res.status(503).json({ status: "error", db: "down" });
+  }
+});
 
 //Import Route Modules
 const customerRoutes = require("./routes/customerRoutes");
@@ -69,6 +89,10 @@ app.use(
     },
   })
 );
+
+// App-wide rate limit on everything under /api (auth routes add a stricter
+// limiter of their own on top of this).
+app.use("/api", apiLimiter);
 
 // ---- PUBLIC routes (no JWT required) ----
 app.use("/api", authRoutes); // Authentication routes (login/signup)

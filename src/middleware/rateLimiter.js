@@ -17,4 +17,19 @@ const authLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === "test",
 });
 
-module.exports = { authLimiter };
+// App-wide limiter for every /api route. Generous enough for normal browsing
+// but caps abuse of the public storefront/checkout endpoints, which proxy
+// straight to Shopify and would otherwise burn the store's API quota.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests. Please slow down and try again later.",
+  },
+  skip: () => process.env.NODE_ENV === "test",
+});
+
+module.exports = { authLimiter, apiLimiter };

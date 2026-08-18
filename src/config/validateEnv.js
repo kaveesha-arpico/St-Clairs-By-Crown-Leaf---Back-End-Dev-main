@@ -14,7 +14,19 @@ const REQUIRED = [
 ];
 
 
-const OPTIONAL = ["PORT", "DB_PORT", "FRONTEND_URL", "SHOPIFY_WEBHOOK_SECRET"];
+const OPTIONAL = [
+  "PORT",
+  "DB_PORT",
+  "FRONTEND_URL",
+  "SHOPIFY_WEBHOOK_SECRET",
+  // Contact-form email (Microsoft Graph) is optional; submissions are stored
+  // regardless of whether mail is configured.
+  "GRAPH_TENANT_ID",
+  "GRAPH_CLIENT_ID",
+  "GRAPH_CLIENT_SECRET",
+  "GRAPH_SENDER",
+  "CONTACT_TO",
+];
 
 function validateEnv() {
   const missing = REQUIRED.filter((key) => {

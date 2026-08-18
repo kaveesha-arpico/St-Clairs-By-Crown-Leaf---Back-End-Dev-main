@@ -32,4 +32,18 @@ const apiLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === "test",
 });
 
-module.exports = { authLimiter, apiLimiter };
+// Public contact form: a handful of messages per IP is plenty for a human;
+// more is abuse. Message wording matches what the frontend renders on 429.
+const contactLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 5, // messages per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many messages. Please try again shortly.",
+  },
+  skip: () => process.env.NODE_ENV === "test",
+});
+
+module.exports = { authLimiter, apiLimiter, contactLimiter };

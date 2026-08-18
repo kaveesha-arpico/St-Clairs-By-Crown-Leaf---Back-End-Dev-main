@@ -51,6 +51,41 @@ const auth = {
   ],
 };
 
+// ---- Contact form (public) ----
+const contact = {
+  create: [
+    body("name")
+      .exists({ checkFalsy: true })
+      .withMessage("name is required")
+      .bail()
+      .isString()
+      .trim()
+      .isLength({ min: 1, max: 100 })
+      .withMessage("name must be 1-100 characters"),
+    body("email")
+      .exists({ checkFalsy: true })
+      .withMessage("email is required")
+      .bail()
+      .isEmail()
+      .withMessage("A valid email is required")
+      .isLength({ max: 254 })
+      .withMessage("email must be at most 254 characters")
+      .normalizeEmail(),
+    body("message")
+      .exists({ checkFalsy: true })
+      .withMessage("message is required")
+      .bail()
+      .isString()
+      .trim()
+      .isLength({ min: 1, max: 5000 })
+      .withMessage("message must be 1-5000 characters"),
+    // Honeypot. Real users never see `company`, so it should be empty. A filled
+    // value is handled by the `honeypot` middleware (fake 201) BEFORE this runs;
+    // here we only ensure it's a string so validation never errors on it.
+    body("company").optional().isString(),
+  ],
+};
+
 // ---- Customers ----
 const customer = {
   create: [
@@ -248,6 +283,7 @@ const storefrontCart = {
 module.exports = {
   idParam,
   auth,
+  contact,
   customer,
   address,
   order,

@@ -73,6 +73,7 @@ const inventoryRoutes = require("./routes/inventoryRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const productRoutes = require("./routes/productRoutes");
 const authRoutes = require("./routes/authRoutes"); // Authentication routes
+const contactRoutes = require("./routes/contactRoutes"); // Public contact form
 const teaProductRoutes = require("./routes/teaProductsRoutes"); // Tea products routes
 const teaOptionsRoutes = require("./routes/teaBlendRoutes"); // Tea options routes
 const shopifyRoutes = require("./routes/shopifyRoutes");
@@ -96,6 +97,7 @@ app.use("/api", apiLimiter);
 
 // ---- PUBLIC routes (no JWT required) ----
 app.use("/api", authRoutes); // Authentication routes (login/signup)
+app.use("/api", contactRoutes); // Public contact form (rate-limited, honeypot)
 app.use("/api", teaProductRoutes); // Storefront tea products
 app.use("/api", teaOptionsRoutes); // Storefront tea options / custom blends
 app.use("/api", shopifyRoutes); // Storefront checkout, product listing, webhook, cart-status

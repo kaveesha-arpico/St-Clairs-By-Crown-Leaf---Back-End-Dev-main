@@ -123,7 +123,8 @@ All routes are prefixed with `/api`. Admin resources follow standard CRUD:
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST /auth/signup`, `POST /auth/login` |
+| Auth | `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` |
+| Contact | `POST /contact` (public, rate-limited, honeypot) |
 | Customers | CRUD on `/customers` |
 | Addresses | CRUD on `/addresses`, `GET /addresses/customer/:customerId` |
 | Orders | CRUD on `/orders` |

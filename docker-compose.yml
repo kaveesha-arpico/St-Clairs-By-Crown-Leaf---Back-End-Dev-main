@@ -1,0 +1,42 @@
+# Production stack for VM 107 — the API + its MariaDB, co-located.
+#
+# - The DB has NO published port: it is reachable only by the backend over the
+#   internal compose network, never from the LAN or the internet.
+# - The backend listens on 5000. The reverse-proxy (VM 106) terminates TLS and
+#   forwards the public domain to <VM107 IP>:5000.
+# - Values come from .env (same file the app uses). See .env.example.
+
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # The app reaches the DB container by its service name, regardless of what
+      # DB_HOST/DB_PORT say in .env (those are written for local dev).
+      DB_HOST: db
+      DB_PORT: "3306"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+
+volumes:
+  dbdata:

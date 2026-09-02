@@ -1,10 +1,10 @@
 # Dependencies
 node_modules/
 
-# Environment / secrets
+# Environment / secrets — ignore every .env variant EXCEPT the template
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Logs
 logs/

@@ -23,28 +23,46 @@ if (process.env.NODE_ENV !== "test") {
   app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 }
 
-// Allowed CORS origins come from FRONTEND_URL (comma-separated).
-// If unset, allow all (preserves dev behaviour) but warn.
-const allowedOrigins = (process.env.FRONTEND_URL || "")
+// Allowed CORS origins come from FRONTEND_URL (comma-separated). Each entry is
+// either an exact origin (https://crownandleaf.uk) or a wildcard whose "*"
+// matches a single subdomain label (https://*.vercel.app matches every Vercel
+// prod + preview deployment). If unset, allow all (dev convenience) but warn.
+const originMatchers = (process.env.FRONTEND_URL || "")
   .split(",")
   .map((o) => o.trim())
-  .filter(Boolean);
+  .filter(Boolean)
+  .map((entry) => {
+    if (entry.includes("*")) {
+      const pattern =
+        "^" + entry.replace(/[.]/g, "\\.").replace(/\*/g, "[^.]+") + "$";
+      const re = new RegExp(pattern);
+      return (origin) => re.test(origin);
+    }
+    return (origin) => origin === entry;
+  });
 
-if (allowedOrigins.length === 0) {
+if (originMatchers.length === 0) {
   console.warn(
     "[CORS] FRONTEND_URL not set — allowing all origins. Set it in .env to restrict."
   );
 }
 
 const corsOptions = {
+  // With credentials enabled, the cors package echoes the specific request
+  // origin (never "*"), which is what browsers require.
   origin: (origin, callback) => {
-    // Allow non-browser clients (no Origin header) and whitelisted origins.
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    // Non-browser clients (curl, server-to-server, Shopify webhooks) send no Origin.
+    if (!origin) return callback(null, true);
+    if (originMatchers.length === 0) return callback(null, true);
+    if (originMatchers.some((match) => match(origin))) {
       return callback(null, true);
     }
     return callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  // Preflight echoes these so the JWT (Authorization) and JSON bodies pass.
+  allowedHeaders: ["Authorization", "Content-Type"],
 };
 app.use(cors(corsOptions));
 

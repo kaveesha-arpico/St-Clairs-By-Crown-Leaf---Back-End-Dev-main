@@ -8,27 +8,22 @@
 
 const prisma = require("../src/config/prisma");
 
-// The "base tea" options the blend builder offers, matching the variants set up
-// on the Custom Blend Tea product in Shopify (the storefront resolves a chosen
-// base tea to a variant by NAME, so these strings must match Shopify exactly).
+// The "base tea" options the blend builder offers. Each combines an estate with
+// a grade (e.g. "Moray BOP", "Laxapana PEKOE"). The NAME is what the storefront
+// resolves to a Custom Blend Tea variant on Shopify (matched by name) and what's
+// written onto the order as the "Base Tea" attribute — so these strings must
+// match the Shopify variant names exactly.
 //
-// Mixed kinds by design: the first five are estates, Silver Tips and Golden
-// Tips are grades. The frontend treats every entry as a selectable base
-// regardless of kind, so they share one list.
-//
-// Spellings here are the corrected ones. Databases seeded before
-// 20260831000000_fix_base_tea_spellings hold "Lakshapana"/"Strathpey"; that
-// migration renames them in place. Always run migrations BEFORE this seed —
-// seeding first would insert the corrected names as new rows rather than
-// renaming the old ones.
+// This seed only INSERTS missing names; it never removes old ones. When the set
+// changes (as in this 2026-09 update, which replaced the earlier estate/tips
+// list), clear base_teas in the target DB first, then re-seed — but only if no
+// custom_blends reference them (FK from custom_blends/custom_orders).
 const BASE_TEAS = [
-  "Laxapana",
-  "Maskeliya",
-  "Moray",
-  "Glentilt",
-  "Strathspey",
-  "Silver Tips",
-  "Golden Tips",
+  "Strathspey BOPF",
+  "Maskeliya Silver Tips",
+  "Glentilt Golden Tips",
+  "Moray BOP",
+  "Laxapana PEKOE",
 ];
 
 // "Spices" is a misnomer now — the last four are peels and flowers. They live

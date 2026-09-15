@@ -25,6 +25,9 @@ model addresses {
 model base_teas {
   id            Int             @id @default(autoincrement())
   name          String          @db.VarChar(100)
+  // Soft-delete flag: retired options are marked inactive (never deleted or
+  // renumbered) so historical recipes referencing them still read back.
+  is_active     Boolean         @default(true)
   custom_blends custom_blends[]
   custom_orders custom_orders[]
 }
@@ -234,6 +237,9 @@ model shopify_store_products {
 model spices {
   id           Int            @id @default(autoincrement())
   name         String         @db.VarChar(100)
+  // Soft-delete flag: retired ingredients are marked inactive (never deleted or
+  // renumbered) so historical recipes referencing them still read back.
+  is_active    Boolean        @default(true)
   blend_spices blend_spices[]
 }
 

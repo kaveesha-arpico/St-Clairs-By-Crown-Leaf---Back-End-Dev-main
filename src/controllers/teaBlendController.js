@@ -30,9 +30,19 @@ function buildBlendAttributes({ ref, baseTeaName, spices }) {
 
 const getTeaOptions = async (req, res) => {
   try {
+    // Only offer active options; retired ones stay in the table (for historical
+    // recipe lookups) but are hidden from the blend builder. Stable id order.
     const [baseTeas, spices] = await Promise.all([
-      prisma.base_teas.findMany({ select: { id: true, name: true } }),
-      prisma.spices.findMany({ select: { id: true, name: true } }),
+      prisma.base_teas.findMany({
+        where: { is_active: true },
+        select: { id: true, name: true },
+        orderBy: { id: "asc" },
+      }),
+      prisma.spices.findMany({
+        where: { is_active: true },
+        select: { id: true, name: true },
+        orderBy: { id: "asc" },
+      }),
     ]);
 
     res.status(200).json({

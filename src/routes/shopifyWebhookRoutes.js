@@ -2,6 +2,7 @@ const express = require("express");
 const {
   ordersCreate,
   ordersPaid,
+  ordersUpdated,
 } = require("../controllers/shopifyWebhookController");
 const verifyShopifyWebhook = require("../middleware/verifyShopifyWebhook");
 
@@ -17,5 +18,11 @@ router.post(
   ordersCreate
 );
 router.post("/webhooks/shopify/orders-paid", verifyShopifyWebhook, ordersPaid);
+// orders/updated delivers cancellations, refunds and edits (register in Shopify).
+router.post(
+  "/webhooks/shopify/orders-updated",
+  verifyShopifyWebhook,
+  ordersUpdated
+);
 
 module.exports = router;

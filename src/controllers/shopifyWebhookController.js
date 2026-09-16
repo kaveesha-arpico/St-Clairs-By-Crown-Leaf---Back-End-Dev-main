@@ -12,6 +12,19 @@
 const prisma = require("../config/prisma");
 const { normalizeCartToken } = require("../lib/cartToken");
 
+// Parse the webhook body from the RAW bytes with a bigint-aware parser. Express's
+// global express.json() already parsed req.body with plain JSON.parse, which
+// rounds Shopify's >53-bit ids (order/line-item/product/variant) — so we must
+// re-parse the exact bytes captured for HMAC and keep every id as a string.
+const JSONBig = require("json-bigint")({ storeAsString: true });
+
+function parseWebhookPayload(req) {
+  if (req.rawBody && req.rawBody.length) {
+    return JSONBig.parse(req.rawBody.toString("utf8"));
+  }
+  return req.body; // fallback (should not happen for a verified webhook)
+}
+
 // Cart-line attributes arrive as [{ name, value }]. Pull out the blend id so
 // production can trace a custom blend back to its recipe.
 const BLEND_ID_KEY = /^blend[\s_-]*id$/i;
@@ -31,14 +44,18 @@ function toDecimal(value) {
   return value === undefined || value === null || value === "" ? null : value;
 }
 
-function toBigInt(value) {
-  return value === undefined || value === null ? null : BigInt(value);
+// Shopify IDs exceed JS Number's 53-bit safe range, so they MUST stay strings
+// end to end (the raw webhook body is parsed with json-bigint upstream). Never
+// wrap them in Number()/BigInt() — either would round the trailing digits.
+function toStringId(value) {
+  return value === undefined || value === null ? null : String(value);
 }
 
-// Write the order and its line items. Upsert throughout: orders/create and
-// orders/paid both carry the full order, and either may arrive first or twice.
+// Write the order and its line items. Upsert throughout: orders/create,
+// orders/paid and orders/updated all carry the full order, and any may arrive
+// first, out of order, or twice — the last write wins and bumps updated_at.
 async function persistOrder(payload) {
-  const orderId = BigInt(payload.id);
+  const orderId = String(payload.id);
 
   const orderData = {
     order_number: payload.name ?? null,
@@ -49,6 +66,9 @@ async function persistOrder(payload) {
     subtotal_amount: toDecimal(payload.subtotal_price),
     total_amount: toDecimal(payload.total_price),
     cart_token: payload.cart_token ?? null,
+    // Cancellation is the signal that must stop a downstream dispense; it comes
+    // through orders/updated (or orders/cancelled), not the financial_status.
+    cancelled_at: payload.cancelled_at ? new Date(payload.cancelled_at) : null,
     shopify_created_at: payload.created_at ? new Date(payload.created_at) : null,
   };
 
@@ -64,8 +84,8 @@ async function persistOrder(payload) {
     for (const item of lineItems) {
       const itemData = {
         shopify_order_id: orderId,
-        product_id: toBigInt(item.product_id),
-        variant_id: toBigInt(item.variant_id),
+        product_id: toStringId(item.product_id),
+        variant_id: toStringId(item.variant_id),
         title: item.title ?? null,
         variant_title: item.variant_title ?? null,
         sku: item.sku ?? null,
@@ -76,9 +96,9 @@ async function persistOrder(payload) {
       };
 
       await tx.shopify_order_line_items.upsert({
-        where: { line_item_id: BigInt(item.id) },
+        where: { line_item_id: String(item.id) },
         update: itemData,
-        create: { line_item_id: BigInt(item.id), ...itemData },
+        create: { line_item_id: String(item.id), ...itemData },
       });
     }
   });
@@ -112,7 +132,7 @@ function makeWebhookHandler(topic, handler) {
         });
       }
 
-      await handler(req.body);
+      await handler(parseWebhookPayload(req));
 
       if (webhookId) {
         await prisma.shopify_webhook_events.update({
@@ -170,4 +190,18 @@ const ordersPaid = makeWebhookHandler("orders/paid", async (payload) => {
   }
 });
 
-module.exports = { ordersCreate, ordersPaid, persistOrder, extractBlendId };
+// POST /api/webhooks/shopify/orders-updated
+// Fires on any change to an order — crucially cancellations and refunds. It just
+// re-persists the full order, which updates financial_status / cancelled_at and
+// bumps updated_at so downstream consumers (the machine feed) re-read it.
+const ordersUpdated = makeWebhookHandler("orders/updated", async (payload) => {
+  await persistOrder(payload);
+});
+
+module.exports = {
+  ordersCreate,
+  ordersPaid,
+  ordersUpdated,
+  persistOrder,
+  extractBlendId,
+};

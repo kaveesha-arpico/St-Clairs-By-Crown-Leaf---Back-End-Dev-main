@@ -275,7 +275,10 @@ model shopify_webhook_events {
 // money and status). Kept separate from the internal `orders` table, which
 // models our own supply-chain orders.
 model shopify_orders {
-  shopify_order_id   BigInt                     @id
+  // Shopify ids are stored as strings: they exceed JS Number's 53-bit safe range,
+  // so BigInt/Number would round the trailing digits (and the JSON output patch
+  // would re-round them). Strings stay exact end to end.
+  shopify_order_id   String                     @id @db.VarChar(32)
   order_number       String?                    @db.VarChar(50)
   email              String?                    @db.VarChar(255)
   financial_status   String?                    @db.VarChar(50)
@@ -284,6 +287,7 @@ model shopify_orders {
   subtotal_amount    Decimal?                   @db.Decimal(10, 2)
   total_amount       Decimal?                   @db.Decimal(10, 2)
   cart_token         String?                    @db.VarChar(255)
+  cancelled_at       DateTime?                  @db.DateTime(0)
   shopify_created_at DateTime?                  @db.DateTime(0)
   created_at         DateTime?                  @default(now()) @db.Timestamp(0)
   updated_at         DateTime?                  @updatedAt @db.Timestamp(0)
@@ -291,16 +295,19 @@ model shopify_orders {
 
   @@index([email], map: "idx_shopify_orders_email")
   @@index([cart_token], map: "idx_shopify_orders_cart_token")
+  // The machine feed pages by updated_at ascending.
+  @@index([updated_at], map: "idx_shopify_orders_updated_at")
 }
 
 // Line items of a Shopify order. `properties` holds the cart-line attributes
 // Shopify passes through (used for custom-blend details) as a JSON string —
 // stored as TEXT rather than a JSON column to avoid MariaDB/Prisma JSON quirks.
 model shopify_order_line_items {
-  line_item_id     BigInt         @id
-  shopify_order_id BigInt
-  product_id       BigInt?
-  variant_id       BigInt?
+  // All Shopify ids stored as strings — see the note in shopify_orders.
+  line_item_id     String         @id @db.VarChar(32)
+  shopify_order_id String         @db.VarChar(32)
+  product_id       String?        @db.VarChar(32)
+  variant_id       String?        @db.VarChar(32)
   title            String?        @db.VarChar(255)
   variant_title    String?        @db.VarChar(255)
   sku              String?        @db.VarChar(100)

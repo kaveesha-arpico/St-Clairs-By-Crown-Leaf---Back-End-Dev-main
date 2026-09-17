@@ -136,4 +136,67 @@ const getMachineOrders = async (req, res) => {
   return res.status(200).json({ orders, has_more: hasMore, next_since });
 };
 
-module.exports = { getMachineOrders };
+// The six statuses the machine reports. Anything else is a client bug → 400.
+const VALID_STATUSES = new Set([
+  "order_received",
+  "pi_received",
+  "blending",
+  "completed",
+  "rejected",
+  "cancelled",
+]);
+
+// POST /api/machine/orders/status
+// The machine reports what happened to an order. Append-only + idempotent:
+//   - one row per (shopify_order_id, status); a retry/duplicate upserts and
+//     returns 2xx (never 400), so the machine stops retrying.
+//   - statuses are stored independently, so arrival order doesn't matter and a
+//     mid-blend cancellation still records `completed` (tea physically exists).
+//   - unknown order id -> 404 (machine logs + stops); invalid body -> 400.
+// This never marks the order fulfilled in Shopify — dispensing isn't shipping.
+const postMachineOrderStatus = async (req, res) => {
+  const { shopify_order_id, status, reason, occurred_at } = req.body || {};
+
+  if (typeof shopify_order_id !== "string" || shopify_order_id.trim() === "") {
+    return res.status(400).json({ error: "shopify_order_id (string) is required." });
+  }
+  if (!VALID_STATUSES.has(status)) {
+    return res.status(400).json({
+      error: `status must be one of: ${[...VALID_STATUSES].join(", ")}.`,
+    });
+  }
+  const epoch = Number(occurred_at);
+  if (!Number.isFinite(epoch) || epoch <= 0) {
+    return res
+      .status(400)
+      .json({ error: "occurred_at (epoch seconds) is required." });
+  }
+  const occurredAt = new Date(epoch * 1000);
+
+  // Unknown order -> 404 so the machine stops retrying (rather than a 500).
+  const order = await prisma.shopify_orders.findUnique({
+    where: { shopify_order_id },
+    select: { shopify_order_id: true },
+  });
+  if (!order) {
+    return res.status(404).json({ error: "Unknown order id." });
+  }
+
+  const data = {
+    reason: reason != null ? String(reason).slice(0, 500) : null,
+    occurred_at: occurredAt,
+  };
+
+  // Idempotent on (order, status): a retry updates in place and still 2xx.
+  await prisma.machine_order_statuses.upsert({
+    where: {
+      shopify_order_id_status: { shopify_order_id, status },
+    },
+    update: data,
+    create: { shopify_order_id, status, ...data },
+  });
+
+  return res.status(200).json({ success: true });
+};
+
+module.exports = { getMachineOrders, postMachineOrderStatus };

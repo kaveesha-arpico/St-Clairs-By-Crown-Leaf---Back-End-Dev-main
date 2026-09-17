@@ -292,11 +292,29 @@ model shopify_orders {
   created_at         DateTime?                  @default(now()) @db.Timestamp(0)
   updated_at         DateTime?                  @updatedAt @db.Timestamp(0)
   line_items         shopify_order_line_items[]
+  machine_statuses   machine_order_statuses[]
 
   @@index([email], map: "idx_shopify_orders_email")
   @@index([cart_token], map: "idx_shopify_orders_cart_token")
   // The machine feed pages by updated_at ascending.
   @@index([updated_at], map: "idx_shopify_orders_updated_at")
+}
+
+// Status reports the tea-dispensing machine writes back for an order (POST
+// /api/machine/orders/status). Append-only log: one row per (order, status), so
+// out-of-order arrivals and retries are naturally idempotent and no status ever
+// overwrites another (e.g. a mid-blend cancellation still records `completed`).
+model machine_order_statuses {
+  id               Int            @id @default(autoincrement())
+  shopify_order_id String         @db.VarChar(32)
+  status           String         @db.VarChar(30)
+  reason           String?        @db.VarChar(500)
+  occurred_at      DateTime       @db.DateTime(3)
+  received_at      DateTime?      @default(now()) @db.Timestamp(0)
+  order            shopify_orders @relation(fields: [shopify_order_id], references: [shopify_order_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_machine_status_order")
+
+  @@unique([shopify_order_id, status], map: "uq_machine_status_order_status")
+  @@index([shopify_order_id], map: "fk_machine_status_order")
 }
 
 // Line items of a Shopify order. `properties` holds the cart-line attributes

@@ -1,12 +1,22 @@
 const express = require("express");
-const { getMachineOrders } = require("../controllers/machineController");
+const {
+  getMachineOrders,
+  postMachineOrderStatus,
+} = require("../controllers/machineController");
 const asyncHandler = require("../middleware/asyncHandler");
 const machineAuth = require("../middleware/machineAuth");
 
 const router = express.Router();
 
-// Read-only order feed for the tea-dispensing machine. Authenticated by its own
-// API key (machineAuth), not JWT — so it sits above the global auth gate.
+// Tea-dispensing machine endpoints. Authenticated by their own API key
+// (machineAuth), not JWT — so they sit above the global auth gate.
+// Read: poll the order feed.
 router.get("/machine/orders", machineAuth, asyncHandler(getMachineOrders));
+// Write-back: the machine reports an order's status (append-only, idempotent).
+router.post(
+  "/machine/orders/status",
+  machineAuth,
+  asyncHandler(postMachineOrderStatus)
+);
 
 module.exports = router;

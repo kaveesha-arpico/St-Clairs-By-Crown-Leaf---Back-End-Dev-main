@@ -26,6 +26,8 @@ const OPTIONAL = [
   "GRAPH_CLIENT_SECRET",
   "GRAPH_SENDER",
   "CONTACT_TO",
+  // TeaMatrix machine feed key(s); feed returns 503 until set.
+  "MACHINE_API_KEYS",
 ];
 
 function validateEnv() {

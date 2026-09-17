@@ -19,10 +19,17 @@ const { normalizeCartToken } = require("../lib/cartToken");
 const JSONBig = require("json-bigint")({ storeAsString: true });
 
 function parseWebhookPayload(req) {
-  if (req.rawBody && req.rawBody.length) {
-    return JSONBig.parse(req.rawBody.toString("utf8"));
+  // rawBody is the exact bytes HMAC was verified over. If it is ever missing we
+  // must NOT fall back to req.body: express.json() already parsed it with plain
+  // JSON.parse and rounded every >53-bit id, so writing it would silently
+  // reintroduce the corruption a previous fix removed. Fail closed instead — the
+  // handler turns this into a 500 and Shopify retries the delivery.
+  if (!req.rawBody || !req.rawBody.length) {
+    throw new Error(
+      "Missing raw webhook body — refusing to parse ids from the rounded req.body."
+    );
   }
-  return req.body; // fallback (should not happen for a verified webhook)
+  return JSONBig.parse(req.rawBody.toString("utf8"));
 }
 
 // Cart-line attributes arrive as [{ name, value }]. Pull out the blend id so
@@ -72,7 +79,11 @@ async function persistOrder(payload) {
     shopify_created_at: payload.created_at ? new Date(payload.created_at) : null,
   };
 
-  const lineItems = Array.isArray(payload.line_items) ? payload.line_items : [];
+  // The payload's line_items is the authoritative current set. We only prune
+  // against it when Shopify actually sent the array — never against a partial
+  // body, which would wrongly wipe an order's items.
+  const hasLineItems = Array.isArray(payload.line_items);
+  const lineItems = hasLineItems ? payload.line_items : [];
 
   await prisma.$transaction(async (tx) => {
     await tx.shopify_orders.upsert({
@@ -80,6 +91,19 @@ async function persistOrder(payload) {
       update: orderData,
       create: { shopify_order_id: orderId, ...orderData },
     });
+
+    // Remove lines that are no longer on the order. An order edit that drops an
+    // item re-delivers the order (via orders/updated) with a reduced
+    // line_items array; without this the stale line lingers forever and the
+    // machine would dispense something the customer removed.
+    if (hasLineItems) {
+      await tx.shopify_order_line_items.deleteMany({
+        where: {
+          shopify_order_id: orderId,
+          line_item_id: { notIn: lineItems.map((item) => String(item.id)) },
+        },
+      });
+    }
 
     for (const item of lineItems) {
       const itemData = {

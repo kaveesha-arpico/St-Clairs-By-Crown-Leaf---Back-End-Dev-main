@@ -99,6 +99,7 @@ const shopifyOrderRoutes = require("./routes/shopifyOrderRoutes"); // Shopify or
 const storefrontRoutes = require("./routes/storefrontRoutes"); // Storefront GraphQL catalog
 const shopifyWebhookRoutes = require("./routes/shopifyWebhookRoutes"); // Shopify order webhooks
 const machineRoutes = require("./routes/machineRoutes"); // TeaMatrix order feed (own API key)
+const accountRoutes = require("./routes/accountRoutes"); // Signed-in customer account (orders)
 
 //Middleware to parse JSON bodies. Capture the raw body so the Shopify
 //webhook route can verify its HMAC signature against the exact bytes.
@@ -128,7 +129,8 @@ app.use("/api", machineRoutes); // TeaMatrix order feed (machine API key, read-o
 // ---- AUTH GATE: every /api route below this line requires a valid JWT ----
 app.use("/api", protect);
 
-// ---- PROTECTED admin / CRUD routes ----
+// ---- PROTECTED customer + admin / CRUD routes ----
+app.use("/api", accountRoutes); // Signed-in customer's own orders (scoped to token email)
 app.use("/api", customerRoutes);
 app.use("/api", addressRoutes);
 app.use("/api", orderRoutes);

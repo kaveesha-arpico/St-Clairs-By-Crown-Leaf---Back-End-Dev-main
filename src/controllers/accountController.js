@@ -9,6 +9,10 @@
 // here unless their email matches a signed-in customer.
 
 const prisma = require("../config/prisma");
+const {
+  storefrontGraphQL,
+  validateVariants,
+} = require("../lib/shopifyStorefront");
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -105,4 +109,138 @@ const getMyOrders = async (req, res) => {
   });
 };
 
-module.exports = { getMyOrders };
+// --- Reorder ---------------------------------------------------------------
+// Minimal cart-create: reorder only needs the checkout URL back, not the full
+// cart shape the storefront cart endpoints return.
+const REORDER_CART_CREATE = `
+  mutation ReorderCartCreate($input: CartInput!) {
+    cartCreate(input: $input) {
+      cart { id checkoutUrl totalQuantity }
+      userErrors { field message }
+    }
+  }
+`;
+
+const VARIANT_GID_PREFIX = "gid://shopify/ProductVariant/";
+
+// POST /api/account/orders/:id/reorder
+// Rebuild a Shopify cart from a past order's line items and hand back a
+// checkout URL. v1 reorders standard products only: custom-blend lines (which
+// carry a blend_id and need the recipe re-resolved) are skipped, as are lines
+// whose variant no longer exists or is sold out. The response reports exactly
+// what was added and what was skipped, so the UI can say "2 of 3 items added".
+const reorder = async (req, res) => {
+  const email = req.user && req.user.email;
+  if (!email) {
+    return res
+      .status(401)
+      .json({ success: false, message: "Authentication required." });
+  }
+
+  const orderId = req.params.id;
+
+  // Ownership is enforced by the email match: an order that isn't this user's
+  // simply isn't found (404), which also avoids revealing that it exists.
+  const order = await prisma.shopify_orders.findFirst({
+    where: { shopify_order_id: orderId, email },
+    select: {
+      shopify_order_id: true,
+      line_items: {
+        select: {
+          variant_id: true,
+          quantity: true,
+          title: true,
+          variant_title: true,
+          blend_id: true,
+        },
+      },
+    },
+  });
+  if (!order) {
+    return res.status(404).json({ success: false, message: "Order not found." });
+  }
+
+  const skipped = [];
+  const candidates = [];
+  for (const li of order.line_items) {
+    const label = [li.title, li.variant_title].filter(Boolean).join(" – ");
+    if (li.blend_id != null) {
+      skipped.push({ title: label, reason: "custom_blend" });
+    } else if (!li.variant_id) {
+      skipped.push({ title: label, reason: "no_variant" });
+    } else {
+      candidates.push({
+        gid: VARIANT_GID_PREFIX + li.variant_id,
+        quantity: li.quantity > 0 ? li.quantity : 1,
+        title: label,
+      });
+    }
+  }
+
+  // Drop anything Shopify no longer sells (discontinued) or has out of stock.
+  const added = [];
+  if (candidates.length > 0) {
+    const { invalid, unavailable } = await validateVariants(
+      candidates.map((c) => c.gid),
+      { buyerIp: req.ip }
+    );
+    const invalidSet = new Set(invalid);
+    const unavailableSet = new Set(unavailable);
+    for (const c of candidates) {
+      if (invalidSet.has(c.gid)) {
+        skipped.push({ title: c.title, reason: "discontinued" });
+      } else if (unavailableSet.has(c.gid)) {
+        skipped.push({ title: c.title, reason: "sold_out" });
+      } else {
+        added.push(c);
+      }
+    }
+  }
+
+  if (added.length === 0) {
+    return res.status(200).json({
+      success: false,
+      reason: "no_items_available",
+      message: "None of the items on this order can be reordered right now.",
+      added: [],
+      skipped,
+    });
+  }
+
+  // Merge duplicate variants (same variant across two lines) into one cart line.
+  const qtyByGid = new Map();
+  for (const c of added) {
+    qtyByGid.set(c.gid, (qtyByGid.get(c.gid) || 0) + c.quantity);
+  }
+  const lines = [...qtyByGid.entries()].map(([merchandiseId, quantity]) => ({
+    merchandiseId,
+    quantity,
+  }));
+
+  // buyerIdentity prefills the checkout with the signed-in customer's email, so
+  // reorder drops them at a ready-to-pay checkout.
+  const data = await storefrontGraphQL(
+    REORDER_CART_CREATE,
+    { input: { lines, buyerIdentity: { email } } },
+    { buyerIp: req.ip }
+  );
+
+  const result = data.cartCreate;
+  if (result.userErrors && result.userErrors.length > 0) {
+    return res.status(502).json({
+      success: false,
+      message: "Could not build the reorder cart.",
+      errors: result.userErrors,
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    checkout_url: result.cart.checkoutUrl,
+    cart_id: result.cart.id,
+    added: added.map((c) => ({ title: c.title, quantity: c.quantity })),
+    skipped,
+  });
+};
+
+module.exports = { getMyOrders, reorder };

@@ -1,6 +1,6 @@
 
 const prisma = require("../config/prisma");
-const { sendContactEmail } = require("../lib/mailer");
+const { sendContactEmail, sendContactConfirmation } = require("../lib/mailer");
 
 // The same success body for a genuine submission and for a honeypot hit, so a
 // bot can't tell the two apart.
@@ -32,8 +32,14 @@ async function createContact(req, res) {
   });
 
 
+  // Best-effort, fire-and-forget: notify the team AND acknowledge to the
+  // customer. Neither blocks the response, and a mail failure never fails the
+  // submission — the stored row above is the durable record.
   sendContactEmail({ name, email, message }).catch((err) =>
-    console.error("[contact] email notification failed:", err.message)
+    console.error("[contact] team notification failed:", err.message)
+  );
+  sendContactConfirmation({ name, email, message }).catch((err) =>
+    console.error("[contact] customer confirmation failed:", err.message)
   );
 
   return res.status(201).json(SUCCESS);

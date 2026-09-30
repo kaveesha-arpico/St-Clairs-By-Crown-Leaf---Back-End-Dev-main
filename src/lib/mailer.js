@@ -10,15 +10,19 @@
 // password, and can be locked to just that mailbox with an Exchange
 // Application Access Policy (see DEPLOYMENT / .env.example).
 //
-// Entirely optional: if the GRAPH_* vars aren't set, sendContactEmail() is a
-// no-op that reports it was skipped, so callers never depend on mail being
+// A contact submission triggers TWO emails (both optional / best-effort):
+//   1. sendContactEmail        -> the shop inbox (the team sees the enquiry)
+//   2. sendContactConfirmation -> the customer  (acknowledges we received it)
+//
+// Entirely optional: if the GRAPH_* vars aren't set, the send functions are a
+// no-op that report they were skipped, so callers never depend on mail being
 // configured — the stored DB row is always the durable record.
 
 const {
   GRAPH_TENANT_ID,
   GRAPH_CLIENT_ID,
   GRAPH_CLIENT_SECRET,
-  GRAPH_SENDER, // the mailbox we send AS, e.g. contact@crownandleaf.co.uk
+  GRAPH_SENDER, // the mailbox we send AS, e.g. contact@crownandleaf.uk
   CONTACT_TO, // where enquiries are delivered (defaults to GRAPH_SENDER)
 } = process.env;
 
@@ -80,35 +84,18 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
-/**
- * Forward a contact-form submission to the shop inbox. Reply-To is set to the
- * customer's address so a reply goes straight back to them.
- * @param {{name:string, email:string, message:string}} submission
- * @returns {Promise<{sent:boolean, skipped?:boolean}>}
- */
-async function sendContactEmail({ name, email, message }) {
-  if (!isConfigured) return { sent: false, skipped: true };
-
-  const to = CONTACT_TO || GRAPH_SENDER;
+// Low-level send: one email AS GRAPH_SENDER. Throws on anything but 202.
+async function sendViaGraph({ to, subject, html, replyTo }) {
   const token = await getAccessToken();
 
-  const payload = {
-    message: {
-      subject: `New contact enquiry from ${name}`,
-      body: {
-        contentType: "HTML",
-        content:
-          `<p><strong>Name:</strong> ${escapeHtml(name)}</p>` +
-          `<p><strong>Email:</strong> ${escapeHtml(email)}</p>` +
-          `<p><strong>Message:</strong></p>` +
-          `<p style="white-space:pre-wrap">${escapeHtml(message)}</p>`,
-      },
-      toRecipients: [{ emailAddress: { address: to } }],
-      // A reply from the inbox goes straight to the customer.
-      replyTo: [{ emailAddress: { address: email } }],
-    },
-    saveToSentItems: true,
+  const message = {
+    subject,
+    body: { contentType: "HTML", content: html },
+    toRecipients: [{ emailAddress: { address: to } }],
   };
+  if (replyTo) {
+    message.replyTo = [{ emailAddress: { address: replyTo } }];
+  }
 
   const res = await fetch(
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
@@ -120,7 +107,7 @@ async function sendContactEmail({ name, email, message }) {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ message, saveToSentItems: true }),
     }
   );
 
@@ -134,4 +121,57 @@ async function sendContactEmail({ name, email, message }) {
   return { sent: true };
 }
 
-module.exports = { sendContactEmail, isMailConfigured: isConfigured };
+/**
+ * Forward a contact-form submission to the shop inbox. Reply-To is the
+ * customer's address so a reply goes straight back to them.
+ * @param {{name:string, email:string, message:string}} submission
+ * @returns {Promise<{sent:boolean, skipped?:boolean}>}
+ */
+async function sendContactEmail({ name, email, message }) {
+  if (!isConfigured) return { sent: false, skipped: true };
+
+  const html =
+    `<p><strong>Name:</strong> ${escapeHtml(name)}</p>` +
+    `<p><strong>Email:</strong> ${escapeHtml(email)}</p>` +
+    `<p><strong>Message:</strong></p>` +
+    `<p style="white-space:pre-wrap">${escapeHtml(message)}</p>`;
+
+  return sendViaGraph({
+    to: CONTACT_TO || GRAPH_SENDER,
+    subject: `New contact enquiry from ${name}`,
+    html,
+    replyTo: email,
+  });
+}
+
+/**
+ * Acknowledge the enquiry to the customer who submitted it, echoing their
+ * message back so they have a copy. Sent AS the shop inbox, so a reply lands
+ * with the team.
+ * @param {{name:string, email:string, message:string}} submission
+ * @returns {Promise<{sent:boolean, skipped?:boolean}>}
+ */
+async function sendContactConfirmation({ name, email, message }) {
+  if (!isConfigured) return { sent: false, skipped: true };
+
+  const firstName = escapeHtml(String(name || "").trim().split(/\s+/)[0] || "there");
+  const html =
+    `<p>Hi ${firstName},</p>` +
+    `<p>Thanks for getting in touch with St. Clair's — we've received your ` +
+    `message and a member of our team will get back to you shortly.</p>` +
+    `<p><strong>Your message:</strong></p>` +
+    `<p style="white-space:pre-wrap">${escapeHtml(message)}</p>` +
+    `<p>Warm regards,<br/>The St. Clair's Team</p>`;
+
+  return sendViaGraph({
+    to: email,
+    subject: "We've received your message — St. Clair's",
+    html,
+  });
+}
+
+module.exports = {
+  sendContactEmail,
+  sendContactConfirmation,
+  isMailConfigured: isConfigured,
+};

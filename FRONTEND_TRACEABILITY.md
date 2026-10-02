@@ -3,10 +3,10 @@
 For the frontend sessions building the **public trace page** (`tea-details.crownandleaf.uk`)
 and the **admin site**.
 
-> **Status: the public endpoint and the admin endpoints are NOT built yet.** This
-> document is the agreed shape so both frontends can be built against mock data in
-> parallel with the backend. Field names here are final unless this file changes.
-> The QR endpoint (§4) *is* live and usable today.
+> **Status:** the QR endpoint (§4) and the whole admin API (§5) are **built and
+> working**. The public trace endpoint (§2) is **not built yet** — that section is
+> the agreed response shape so the trace page can be built against mock data in
+> parallel. Field names there are final unless this file changes.
 
 ## Pilot scope
 
@@ -163,27 +163,115 @@ No auth, so it works directly in an `<img>` tag:
 
 ---
 
-## 5. Admin site — endpoints to expect
+## 5. Admin site — these are built ✅
 
-Not built yet; shape subject to change until §5 loses this line.
+Staff log in separately from customers and get a JWT carrying `typ: "staff"`.
+**A customer token is rejected with 403 on every admin route**, so the admin site
+needs its own login screen — don't reuse the storefront's.
 
-Staff log in separately from customers (`POST /api/staff/auth/login`) and get a JWT
-carrying a staff role. **A customer token will never be accepted on these routes**, so
-the admin site needs its own login screen — don't reuse the storefront's.
+### Login — `POST /api/staff/auth/login`
 
-Planned:
+```json
+// body
+{ "email": "ann@crownandleaf.uk", "password": "..." }
+```
+```json
+// 200
+{ "message": "Login successful.", "token": "<jwt>",
+  "user": { "staffId": 1, "email": "ann@crownandleaf.uk", "name": "Ann Perera",
+            "role": "admin", "typ": "staff" } }
+```
 
-| Purpose | Endpoint |
+- `401 { "message": "Invalid email or password." }` — identical for a wrong
+  password, an unknown email and a deactivated account, so the endpoint can't be
+  used to discover who has an account. Don't try to tell them apart in the UI.
+- `GET /api/staff/auth/me` re-hydrates the user after a page reload. It re-reads
+  the account, so a staff member deactivated mid-session gets a `401` at their
+  next page load — treat that as logged out.
+- **There is no signup endpoint.** Accounts are created on the server with
+  `scripts/createStaffUser.js`. Don't build a registration screen.
+
+### Roles
+
+| Role | Can do |
 |---|---|
-| Staff login | `POST /api/staff/auth/login` |
-| Estates / factories / lots / pack runs CRUD | `/api/admin/...` |
-| Record packing (scan pack-run codes against an order) | `POST /api/admin/orders/:id/allocations` |
-| Order list, with **search by trace code** | `GET /api/admin/orders?code=...` |
+| `staff` | everything below except customer details |
+| `admin` | the above, plus `GET /api/admin/orders/:id/customer` |
 
-Two things worth knowing while you design the admin screens:
+### Endpoints
 
-- **The QR download link is just the §4 URL.** No special endpoint, no auth — point an
-  `<img>` or a download link at it.
-- **Customer names are not stored in our database**, only the email. The order list
-  will fetch names from Shopify on demand, so expect that field to be slower and to be
-  absent if Shopify is unreachable. Don't block the table render on it.
+Send `Authorization: Bearer <staff jwt>` on all of these.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET/POST | `/api/admin/estates` | `?include_inactive=true` to see retired ones |
+| GET/PUT/DELETE | `/api/admin/estates/:id` | DELETE **deactivates**, never removes |
+| GET/POST | `/api/admin/factories` | same shape as estates |
+| GET/PUT/DELETE | `/api/admin/factories/:id` | DELETE **deactivates** |
+| GET/POST | `/api/admin/lots` | `?grade=Golden Tips`, `?estate_id=1` |
+| GET/PUT/DELETE | `/api/admin/lots/:id` | DELETE is real, but `409` once it has pack runs |
+| GET/POST | `/api/admin/pack-runs` | `?lot_id=`, `?sku=` |
+| GET/PUT/DELETE | `/api/admin/pack-runs/:id` | DELETE gives `409` once allocated to an order |
+| GET | `/api/admin/pack-runs/by-code/:code` | **the barcode scan** |
+| GET | `/api/admin/orders` | `?code=`, `?order_number=`, `?limit=` |
+| GET | `/api/admin/orders/:orderId/allocations` | packing progress |
+| POST | `/api/admin/orders/:orderId/allocations` | record packing |
+| DELETE | `/api/admin/allocations/:id` | undo a mis-scan |
+| GET | `/api/admin/orders/:orderId/customer` | **admin role only** |
+
+### The packing screen
+
+Scan a barcode → `GET /api/admin/pack-runs/by-code/PRT-A` returns the run with
+its lot, estate and factory, so the operator can confirm what they picked up
+before committing it.
+
+Then submit, several scans at a time:
+
+```json
+// POST /api/admin/orders/<shopify_order_id>/allocations
+{ "allocations": [
+    { "line_item_id": "1234...", "pack_run_code": "PRT-A", "quantity": 2 },
+    { "line_item_id": "1234...", "pack_run_code": "PRT-B", "quantity": 1 }
+] }
+```
+
+**The whole request succeeds or fails together.** If one scan is bad, nothing is
+written — so on an error, the operator re-submits the batch rather than hunting
+for which ones landed. Errors are `400` with a specific message:
+
+- `unknown_codes: [...]` — a barcode that doesn't exist
+- allocating more than the line ordered (the message gives both numbers)
+- a `line_item_id` that belongs to a different order
+
+**Re-scanning the same pack run on the same line REPLACES its quantity**, it does
+not add to it. That's what an operator fixing a typo expects — but it means your
+UI should show the current allocation, not assume it's adding.
+
+`GET .../allocations` returns `outstanding` per line and `fully_packed` for the
+order — use those to drive a "needs packing" filter.
+
+### The order list
+
+```json
+{ "count": 1, "orders": [ {
+    "shopify_order_id": "...", "order_number": "#1043",
+    "trace_code": "2ZHVJK7YW3W7", "trace_status": "active",
+    "qr_url": "/api/qr/2ZHVJK7YW3W7.png",
+    "dispatched_at": null, "scan_count": 0,
+    "fully_packed": false,
+    "items": [ { "line_item_id": "...", "title": "Glentilt Golden Tips",
+                 "sku": "GT-100", "quantity": 3, "allocated": 2 } ]
+} ] }
+```
+
+- **`?code=` is the support path.** A customer emails "my code is X and the page
+  is broken" — this is the only way to find that order, because the code exists
+  nowhere else, not even in Shopify. Build a search box for it.
+  It tolerates lowercase and hyphens. A malformed code returns `count: 0` rather
+  than an unfiltered first page.
+- **`qr_url` is relative** — resolve it against whatever API origin you're already
+  using. It needs no auth, so it drops straight into an `<img>` or a download link.
+- **No customer name or email is in this response.** Fetch the name separately
+  from `/api/admin/orders/:id/customer` (admin role), which asks Shopify live.
+  It's slower than the rest of the list and returns `502` when Shopify is
+  unreachable, so load it per-row *after* the table renders — never block on it.

@@ -156,73 +156,6 @@ const orderAddress = {
   ],
 };
 
-// ---- Supply chain ----
-const plantation = {
-  create: [requiredString("plantation_name"), optionalString("tea_grade")],
-  update: [requiredString("plantation_name"), optionalString("tea_grade")],
-  idParam,
-};
-
-const field = {
-  create: [requiredInt("plantation_id"), optionalString("field_information")],
-  update: [requiredInt("plantation_id"), optionalString("field_information")],
-  idParam,
-};
-
-const factory = {
-  create: [requiredString("factory_name"), optionalString("other_info")],
-  update: [requiredString("factory_name"), optionalString("other_info")],
-  idParam,
-};
-
-const batch = {
-  create: [
-    requiredInt("factory_id"),
-    requiredInt("field_id"),
-    body("harvested_date").optional().isISO8601().withMessage("harvested_date must be a valid date"),
-  ],
-  update: [
-    requiredInt("factory_id"),
-    requiredInt("field_id"),
-    body("harvested_date").optional().isISO8601().withMessage("harvested_date must be a valid date"),
-  ],
-  idParam,
-};
-
-const inventory = {
-  create: [
-    requiredInt("location_id"),
-    requiredInt("batch_id"),
-    body("quantity").isInt({ min: 0 }).withMessage("quantity must be a non-negative integer"),
-  ],
-  update: [
-    requiredInt("location_id"),
-    requiredInt("batch_id"),
-    body("quantity").isInt({ min: 0 }).withMessage("quantity must be a non-negative integer"),
-  ],
-  idParam,
-};
-
-const location = {
-  create: [requiredString("location_name"), optionalString("other_info")],
-  update: [requiredString("location_name"), optionalString("other_info")],
-  idParam,
-};
-
-const product = {
-  create: [
-    requiredInt("batch_id"),
-    body("quantity").isInt({ min: 0 }).withMessage("quantity must be a non-negative integer"),
-    requiredString("product_name"),
-  ],
-  update: [
-    requiredInt("batch_id"),
-    body("quantity").isInt({ min: 0 }).withMessage("quantity must be a non-negative integer"),
-    requiredString("product_name"),
-  ],
-  idParam,
-};
-
 // ---- Tea blend ----
 const teaBlend = {
   createCustomBlend: [
@@ -280,6 +213,77 @@ const storefrontCart = {
   ],
 };
 
+// ---- Staff auth (admin site) ----
+const staffAuth = {
+  login: [
+    body("email").isEmail().withMessage("A valid email is required").normalizeEmail(),
+    body("password").notEmpty().withMessage("password is required"),
+  ],
+};
+
+// ---- Traceability admin API ----
+// Create rules require their fields; update rules make everything optional so a
+// PUT can change one column without resending the whole record.
+const admin = {
+  idParam,
+
+  estateCreate: [
+    requiredString("name").isLength({ max: 150 }),
+    optionalString("region").isLength({ max: 100 }),
+  ],
+  estateUpdate: [
+    optionalString("name").isLength({ min: 1, max: 150 }),
+    optionalString("region").isLength({ max: 100 }),
+    body("is_active").optional().isBoolean().withMessage("is_active must be a boolean"),
+  ],
+
+  factoryCreate: [requiredString("name").isLength({ max: 150 })],
+  factoryUpdate: [
+    optionalString("name").isLength({ min: 1, max: 150 }),
+    body("is_active").optional().isBoolean().withMessage("is_active must be a boolean"),
+  ],
+
+  lotCreate: [
+    requiredString("lot_number").isLength({ max: 50 }),
+    requiredInt("estate_id"),
+    requiredInt("factory_id"),
+    optionalString("grade").isLength({ max: 100 }),
+  ],
+  lotUpdate: [
+    optionalString("lot_number").isLength({ min: 1, max: 50 }),
+    body("estate_id").optional().isInt({ min: 1 }),
+    body("factory_id").optional().isInt({ min: 1 }),
+    optionalString("grade").isLength({ max: 100 }),
+  ],
+
+  packRunCreate: [
+    requiredString("pack_run_code").isLength({ max: 50 }),
+    requiredInt("lot_id"),
+    body("packed_date").isISO8601().withMessage("packed_date must be a date (YYYY-MM-DD)"),
+    optionalString("shopify_product_id").isLength({ max: 32 }),
+    optionalString("sku").isLength({ max: 100 }),
+    body("quantity_packed").optional({ nullable: true }).isInt({ min: 0 }),
+  ],
+  packRunUpdate: [
+    optionalString("pack_run_code").isLength({ min: 1, max: 50 }),
+    body("lot_id").optional().isInt({ min: 1 }),
+    body("packed_date").optional().isISO8601(),
+    optionalString("shopify_product_id").isLength({ max: 32 }),
+    optionalString("sku").isLength({ max: 100 }),
+    body("quantity_packed").optional({ nullable: true }).isInt({ min: 0 }),
+  ],
+
+  // Several scans submitted together. Quantities must be positive: a zero or
+  // negative allocation would pass the "not over-allocated" check while
+  // recording a link to a pack run that contributed nothing.
+  allocations: [
+    body("allocations").isArray({ min: 1 }).withMessage("allocations must be a non-empty array"),
+    body("allocations.*.line_item_id").notEmpty().withMessage("line_item_id is required"),
+    body("allocations.*.pack_run_code").notEmpty().withMessage("pack_run_code is required"),
+    body("allocations.*.quantity").isInt({ min: 1 }).withMessage("quantity must be at least 1"),
+  ],
+};
+
 module.exports = {
   idParam,
   auth,
@@ -288,14 +292,9 @@ module.exports = {
   address,
   order,
   orderAddress,
-  plantation,
-  field,
-  factory,
-  batch,
-  inventory,
-  location,
-  product,
   teaBlend,
   shopify,
   storefrontCart,
+  staffAuth,
+  admin,
 };

@@ -32,20 +32,6 @@ model base_teas {
   custom_orders custom_orders[]
 }
 
-model batch {
-  batch_id       Int         @id @default(autoincrement())
-  factory_id     Int
-  field_id       Int
-  harvested_date DateTime?   @db.Date
-  factory        factory     @relation(fields: [factory_id], references: [factory_id], onUpdate: Restrict, map: "fk_batch_factory")
-  field          field       @relation(fields: [field_id], references: [field_id], onUpdate: Restrict, map: "fk_batch_field")
-  inventory      inventory[]
-  product        product[]
-
-  @@index([factory_id], map: "fk_batch_factory")
-  @@index([field_id], map: "fk_batch_field")
-}
-
 model blend_spices {
   blend_id      Int
   spice_id      Int
@@ -90,42 +76,6 @@ model customers {
   updated_at     DateTime?   @default(now()) @db.Timestamp(0)
   addresses      addresses[]
   orders         orders[]
-}
-
-model factory {
-  factory_id   Int     @id @default(autoincrement())
-  factory_name String  @db.VarChar(150)
-  other_info   String? @db.Text
-  batch        batch[]
-}
-
-model field {
-  field_id          Int        @id @default(autoincrement())
-  plantation_id     Int
-  field_information String?    @db.Text
-  batch             batch[]
-  plantation        plantation @relation(fields: [plantation_id], references: [plantation_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_field_plantation")
-
-  @@index([plantation_id], map: "fk_field_plantation")
-}
-
-model inventory {
-  inventory_id Int      @id @default(autoincrement())
-  location_id  Int
-  batch_id     Int
-  quantity     Int      @default(0)
-  batch        batch    @relation(fields: [batch_id], references: [batch_id], onUpdate: Restrict, map: "fk_inventory_batch")
-  location     location @relation(fields: [location_id], references: [location_id], onUpdate: Restrict, map: "fk_inventory_location")
-
-  @@index([batch_id], map: "fk_inventory_batch")
-  @@index([location_id], map: "fk_inventory_location")
-}
-
-model location {
-  location_id   Int         @id @default(autoincrement())
-  location_name String      @db.VarChar(150)
-  other_info    String?     @db.Text
-  inventory     inventory[]
 }
 
 model order_addresses {
@@ -180,23 +130,6 @@ model contact_messages {
   created_at DateTime? @default(now()) @db.Timestamp(0)
 
   @@index([created_at], map: "idx_contact_messages_created_at")
-}
-
-model plantation {
-  plantation_id   Int     @id @default(autoincrement())
-  plantation_name String  @db.VarChar(150)
-  tea_grade       String? @db.VarChar(100)
-  field           field[]
-}
-
-model product {
-  traceability_id Int     @id @default(autoincrement())
-  batch_id        Int
-  quantity        Int?
-  product_name    String? @db.VarChar(150)
-  batch           batch   @relation(fields: [batch_id], references: [batch_id], onUpdate: Restrict, map: "fk_product_batch")
-
-  @@index([batch_id], map: "fk_product_batch")
 }
 
 model product_variants {
@@ -480,4 +413,24 @@ model product_trace_info {
   // frontend renders the unit.
   package_weight_g   Int?
   updated_at         DateTime? @default(now()) @db.Timestamp(0)
+}
+
+// Staff accounts for the admin site. Separate from `customers` on purpose:
+// `customers` is written by the public signup endpoint, so a role column there
+// would put the privilege flag one bug away from the open internet.
+//
+// No staff signup endpoint exists — accounts are created with
+// scripts/createStaffUser.js by someone with server access.
+model staff_users {
+  staff_id      Int       @id @default(autoincrement())
+  email         String    @unique(map: "uq_staff_users_email") @db.VarChar(255)
+  name          String    @db.VarChar(150)
+  password      String    @db.VarChar(255)
+  // 'admin' or 'staff'. Both reach the admin API; only 'admin' sees customer
+  // names on the order list.
+  role          String    @default("staff") @db.VarChar(20)
+  // Deactivate rather than delete, so "who entered this lot" keeps resolving.
+  is_active     Boolean   @default(true)
+  last_login_at DateTime? @db.DateTime(0)
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
 }

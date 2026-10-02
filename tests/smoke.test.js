@@ -66,7 +66,7 @@ const validToken = () =>
   jwt.sign({ userId: 1 }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
 test("protected route without token -> 401", async () => {
-  const res = await request("GET", "/api/plantation");
+  const res = await request("GET", "/api/orders");
   assert.strictEqual(res.status, 401);
 });
 

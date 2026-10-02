@@ -83,13 +83,6 @@ const customerRoutes = require("./routes/customerRoutes");
 const addressRoutes = require("./routes/addressRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const orderAddressRoutes = require("./routes/orderAddressRoutes");
-const plantationRoutes = require("./routes/plantationRoutes");
-const batchRoutes = require("./routes/batchRoutes");
-const factoryRoutes = require("./routes/factoryRoutes");
-const fieldRoutes = require("./routes/fieldRoutes");
-const inventoryRoutes = require("./routes/inventoryRoutes");
-const locationRoutes = require("./routes/locationRoutes");
-const productRoutes = require("./routes/productRoutes");
 const authRoutes = require("./routes/authRoutes"); // Authentication routes
 const contactRoutes = require("./routes/contactRoutes"); // Public contact form
 const teaProductRoutes = require("./routes/teaProductsRoutes"); // Tea products routes
@@ -101,6 +94,8 @@ const shopifyWebhookRoutes = require("./routes/shopifyWebhookRoutes"); // Shopif
 const machineRoutes = require("./routes/machineRoutes"); // TeaMatrix order feed (own API key)
 const accountRoutes = require("./routes/accountRoutes"); // Signed-in customer account (orders)
 const qrRoutes = require("./routes/qrRoutes"); // Traceability QR images (public, no DB lookup)
+const staffAuthRoutes = require("./routes/staffAuthRoutes"); // Admin-site staff login (public)
+const adminRoutes = require("./routes/adminRoutes"); // Traceability admin API (staff only)
 
 //Middleware to parse JSON bodies. Capture the raw body so the Shopify
 //webhook route can verify its HMAC signature against the exact bytes.
@@ -127,23 +122,20 @@ app.use("/api", storefrontRoutes); // Storefront GraphQL catalog (products, cart
 app.use("/api", shopifyWebhookRoutes); // Shopify order webhooks (HMAC-verified)
 app.use("/api", machineRoutes); // TeaMatrix order feed (machine API key, read-only)
 app.use("/api", qrRoutes); // Traceability QR images (public so <img> tags work)
+app.use("/api", staffAuthRoutes); // Staff login for the admin site (rate-limited)
 
 // ---- AUTH GATE: every /api route below this line requires a valid JWT ----
 app.use("/api", protect);
 
 // ---- PROTECTED customer + admin / CRUD routes ----
 app.use("/api", accountRoutes); // Signed-in customer's own orders (scoped to token email)
+// Traceability admin API. The router applies requireStaff to everything under
+// /admin, so a customer token gets past `protect` here but no further.
+app.use("/api", adminRoutes);
 app.use("/api", customerRoutes);
 app.use("/api", addressRoutes);
 app.use("/api", orderRoutes);
 app.use("/api", orderAddressRoutes);
-app.use("/api", plantationRoutes);
-app.use("/api", fieldRoutes);
-app.use("/api", factoryRoutes);
-app.use("/api", batchRoutes);
-app.use("/api", productRoutes);
-app.use("/api", inventoryRoutes);
-app.use("/api", locationRoutes);
 
 //This is for global error handling middleware.
 //Logs full detail server-side; never leaks internals to the client.

@@ -1,77 +1,93 @@
-const prisma = require('../config/prisma');
+// factoryController.js
+// Admin CRUD for tea factories — "Factory" on the public trace page.
+// Every route here is behind protect + requireStaff (see routes/adminRoutes.js).
+//
+// NOTE: this replaces an identically-named controller for the old, unused
+// `factory` table, which was dropped in 20261002010000_drop_legacy_supply_chain.
 
-// CRUD Operations for Factory
-// CREATE a new factory
+const prisma = require("../config/prisma");
+
+// GET /api/admin/factories?include_inactive=true
+exports.listFactories = async (req, res) => {
+  const where =
+    req.query.include_inactive === "true" ? {} : { is_active: true };
+
+  const factories = await prisma.factories.findMany({
+    where,
+    orderBy: { name: "asc" },
+  });
+  res.status(200).json(factories);
+};
+
+// GET /api/admin/factories/:id
+exports.getFactory = async (req, res) => {
+  const factory = await prisma.factories.findUnique({
+    where: { factory_id: Number(req.params.id) },
+  });
+  if (!factory) {
+    return res.status(404).json({ message: "Factory not found." });
+  }
+  res.status(200).json(factory);
+};
+
+// POST /api/admin/factories
 exports.createFactory = async (req, res) => {
   try {
-    const { factory_name, other_info } = req.body;
-    const created = await prisma.factory.create({
-      data: { factory_name, other_info },
-      select: { factory_id: true },
+    const created = await prisma.factories.create({
+      data: { name: req.body.name },
     });
-    res.status(201).json({ factory_id: created.factory_id, factory_name, other_info });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error creating factory' });
-  }
-};
-
-// READ all factories
-exports.getAllFactories = async (req, res) => {
-  try {
-    const rows = await prisma.factory.findMany();
-    res.status(200).json(rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error fetching factories' });
-  }
-};
-
-// READ one factory by id
-exports.getFactoryById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const row = await prisma.factory.findUnique({ where: { factory_id: Number(id) } });
-    if (!row) {
-      return res.status(404).json({ error: 'Factory not found' });
+    res.status(201).json(created);
+  } catch (err) {
+    if (err.code === "P2002") {
+      return res
+        .status(409)
+        .json({ message: "A factory with that name already exists." });
     }
-    res.status(200).json(row);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error fetching factory' });
+    throw err;
   }
 };
 
-// UPDATE a factory
+// PUT /api/admin/factories/:id
 exports.updateFactory = async (req, res) => {
+  const { name, is_active } = req.body;
   try {
-    const { id } = req.params;
-    const { factory_name, other_info } = req.body;
-    await prisma.factory.update({
-      where: { factory_id: Number(id) },
-      data: { factory_name, other_info },
+    const updated = await prisma.factories.update({
+      where: { factory_id: Number(req.params.id) },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(is_active !== undefined && { is_active }),
+      },
     });
-    res.status(200).json({ message: 'Factory updated successfully' });
-  } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Factory not found' });
+    res.status(200).json(updated);
+  } catch (err) {
+    if (err.code === "P2025") {
+      return res.status(404).json({ message: "Factory not found." });
     }
-    console.error(error);
-    res.status(500).json({ error: 'Error updating factory' });
+    if (err.code === "P2002") {
+      return res
+        .status(409)
+        .json({ message: "A factory with that name already exists." });
+    }
+    throw err;
   }
 };
 
-// DELETE a factory
-exports.deleteFactory = async (req, res) => {
+// DELETE /api/admin/factories/:id
+// Deactivates rather than deletes — same reasoning as estates: a shipped trace
+// page must keep resolving its factory forever.
+exports.deactivateFactory = async (req, res) => {
   try {
-    const { id } = req.params;
-    await prisma.factory.delete({ where: { factory_id: Number(id) } });
-    res.status(200).json({ message: 'Factory deleted successfully' });
-  } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Factory not found' });
+    const updated = await prisma.factories.update({
+      where: { factory_id: Number(req.params.id) },
+      data: { is_active: false },
+    });
+    res
+      .status(200)
+      .json({ message: "Factory deactivated.", factory: updated });
+  } catch (err) {
+    if (err.code === "P2025") {
+      return res.status(404).json({ message: "Factory not found." });
     }
-    console.error(error);
-    res.status(500).json({ error: 'Error deleting factory' });
+    throw err;
   }
 };

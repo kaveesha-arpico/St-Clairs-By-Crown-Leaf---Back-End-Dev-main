@@ -3,6 +3,7 @@ const {
   ordersCreate,
   ordersPaid,
   ordersUpdated,
+  ordersFulfilled,
 } = require("../controllers/shopifyWebhookController");
 const verifyShopifyWebhook = require("../middleware/verifyShopifyWebhook");
 
@@ -23,6 +24,14 @@ router.post(
   "/webhooks/shopify/orders-updated",
   verifyShopifyWebhook,
   ordersUpdated
+);
+
+// orders/fulfilled supplies the dispatch date for the public trace page.
+// Register in Shopify as "Order fulfillment" (not "Fulfillment creation").
+router.post(
+  "/webhooks/shopify/orders-fulfilled",
+  verifyShopifyWebhook,
+  ordersFulfilled
 );
 
 module.exports = router;

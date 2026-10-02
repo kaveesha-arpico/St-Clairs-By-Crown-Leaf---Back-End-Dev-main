@@ -293,6 +293,7 @@ model shopify_orders {
   updated_at         DateTime?                  @updatedAt @db.Timestamp(0)
   line_items         shopify_order_line_items[]
   machine_statuses   machine_order_statuses[]
+  trace_code         trace_codes?
 
   @@index([email], map: "idx_shopify_orders_email")
   @@index([cart_token], map: "idx_shopify_orders_cart_token")
@@ -334,7 +335,149 @@ model shopify_order_line_items {
   blend_id         String?        @db.VarChar(100)
   properties       String?        @db.Text
   order            shopify_orders @relation(fields: [shopify_order_id], references: [shopify_order_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_line_items_shopify_order")
+  allocations      order_allocations[]
 
   @@index([shopify_order_id], map: "fk_line_items_shopify_order")
   @@index([blend_id], map: "idx_line_items_blend_id")
+}
+
+// Public traceability codes — the 12-character string behind the QR on a label
+// or invoice. One per Shopify order (enforced by uq_trace_codes_order).
+//
+// Codes are cryptographically random, never derived from the order number: the
+// code is the only thing that keeps one customer's trace page separate from
+// another's, so a guessable code would expose every order ever shipped.
+// See src/lib/traceCode.js.
+model trace_codes {
+  code             String         @id @db.VarChar(12)
+  shopify_order_id String         @unique(map: "uq_trace_codes_order") @db.VarChar(32)
+  // active | revoked. Dispatch lives in dispatched_at, NOT here, so a shipped
+  // code can still be revoked.
+  status           String         @default("active") @db.VarChar(20)
+  scan_count       Int            @default(0)
+  first_scanned_at DateTime?      @db.DateTime(0)
+  dispatched_at    DateTime?      @db.DateTime(0)
+  created_at       DateTime?      @default(now()) @db.Timestamp(0)
+  order            shopify_orders @relation(fields: [shopify_order_id], references: [shopify_order_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_trace_codes_order")
+
+  @@index([status], map: "idx_trace_codes_status")
+}
+
+// ---------------------------------------------------------------------------
+// Traceability chain. Models exactly the five details the public trace page
+// shows: Plantation, Factory, Packed Date, Ingredients, Package Weight.
+//
+//   order line -> order_allocations -> pack_runs -> lots -> estates/factories
+//
+// The richer chain in the original brief (harvests, wither hours, moisture,
+// cupping, shipments, Tea Board refs) was deliberately scoped out: it would
+// need per-lot data entry from the estate, the factory and the shipping agent
+// forever, and a page with blanks reads worse than a short page that is always
+// complete. All of it can be added later as nullable columns or new tables
+// hanging off `lots`, without reshaping any of this.
+//
+// NOTE: `estates`/`factories` are new. The unused legacy tables from an earlier
+// phase (plantation, field, factory, batch, product, inventory, location) are
+// untouched and should be dropped separately once production is confirmed empty.
+// ---------------------------------------------------------------------------
+
+// Tea estates — "Plantation" on the customer-facing page.
+model estates {
+  estate_id  Int       @id @default(autoincrement())
+  name       String    @unique(map: "uq_estates_name") @db.VarChar(150)
+  region     String?   @db.VarChar(100)
+  // Soft delete (matching base_teas/spices): retired estates are marked
+  // inactive, never deleted, so historic lots still read back.
+  is_active  Boolean   @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  lots       lots[]
+}
+
+// Tea factories. Separate from estates because a factory serves many lots and
+// tea is not always manufactured on the estate that grew it.
+model factories {
+  factory_id Int       @id @default(autoincrement())
+  name       String    @unique(map: "uq_factories_name") @db.VarChar(150)
+  is_active  Boolean   @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  lots       lots[]
+}
+
+// A manufactured lot — the unit that carries provenance. estate and factory are
+// both required: a lot of unknown origin has no business on a trace page.
+model lots {
+  lot_id     Int         @id @default(autoincrement())
+  lot_number String      @unique(map: "uq_lots_lot_number") @db.VarChar(50)
+  estate_id  Int
+  factory_id Int
+  // e.g. "Golden Tips" — drives the pilot gating on the public endpoint.
+  grade      String?     @db.VarChar(100)
+  created_at DateTime?   @default(now()) @db.Timestamp(0)
+  estate     estates     @relation(fields: [estate_id], references: [estate_id], onDelete: Restrict, onUpdate: Restrict, map: "fk_lots_estate")
+  factory    factories   @relation(fields: [factory_id], references: [factory_id], onDelete: Restrict, onUpdate: Restrict, map: "fk_lots_factory")
+  pack_runs  pack_runs[]
+
+  @@index([estate_id], map: "fk_lots_estate")
+  @@index([factory_id], map: "fk_lots_factory")
+  @@index([grade], map: "idx_lots_grade")
+}
+
+// A packing run — one batch of retail units packed on one day. Supplies
+// "Packed Date".
+//
+// lot_id is required, which is how "exactly one lot per pack run" is enforced:
+// the database makes a run with no lot, or two lots, unrepresentable rather
+// than trusting application code to check.
+model pack_runs {
+  pack_run_id        Int                 @id @default(autoincrement())
+  // The identifier staff scan when packing an order.
+  pack_run_code      String              @unique(map: "uq_pack_runs_code") @db.VarChar(50)
+  lot_id             Int
+  packed_date        DateTime            @db.Date
+  // Shopify ids are strings throughout — they exceed JS Number's safe range.
+  shopify_product_id String?             @db.VarChar(32)
+  sku                String?             @db.VarChar(100)
+  quantity_packed    Int?
+  created_at         DateTime?           @default(now()) @db.Timestamp(0)
+  lot                lots                @relation(fields: [lot_id], references: [lot_id], onDelete: Restrict, onUpdate: Restrict, map: "fk_pack_runs_lot")
+  allocations        order_allocations[]
+
+  @@index([lot_id], map: "fk_pack_runs_lot")
+  @@index([shopify_product_id], map: "idx_pack_runs_product")
+}
+
+// Which pack run(s) fulfilled a given order line.
+//
+// One row per (line item, pack run), not per line item: an order line can span
+// two pack runs when a run runs out mid-pick, so the quantity splits across
+// rows. The database cannot check that the quantities sum to the line item's
+// quantity — that cross-row rule lives in the packing endpoint.
+model order_allocations {
+  allocation_id Int                      @id @default(autoincrement())
+  line_item_id  String                   @db.VarChar(32)
+  pack_run_id   Int
+  quantity      Int
+  created_at    DateTime?                @default(now()) @db.Timestamp(0)
+  line_item     shopify_order_line_items @relation(fields: [line_item_id], references: [line_item_id], onDelete: Cascade, onUpdate: Restrict, map: "fk_order_allocations_line_item")
+  pack_run      pack_runs                @relation(fields: [pack_run_id], references: [pack_run_id], onDelete: Restrict, onUpdate: Restrict, map: "fk_order_allocations_pack_run")
+
+  @@unique([line_item_id, pack_run_id], map: "uq_order_allocations_line_run")
+  @@index([line_item_id], map: "fk_order_allocations_line_item")
+  @@index([pack_run_id], map: "fk_order_allocations_pack_run")
+}
+
+// Per-product trace copy — "Ingredients" and "Package Weight" for standard
+// products. No FK: shopify_store_products keys on BIGINT while every id in this
+// chain is VARCHAR(32), and the two cannot be joined by a constraint.
+//
+// Custom blends take their ingredients from the order's own recipe instead
+// (line_items.blend_id -> custom_blends -> blend_spices), since each is
+// per-customer; the public endpoint prefers that when present.
+model product_trace_info {
+  shopify_product_id String    @id @db.VarChar(32)
+  ingredients        String?   @db.VarChar(500)
+  // Net weight in grams — numeric so it can be formatted per locale; the
+  // frontend renders the unit.
+  package_weight_g   Int?
+  updated_at         DateTime? @default(now()) @db.Timestamp(0)
 }

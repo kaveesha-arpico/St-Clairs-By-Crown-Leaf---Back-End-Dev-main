@@ -85,25 +85,42 @@ Register against the **production** store (matching `SHOPIFY_WEBHOOK_SECRET`):
 Then place one real test order and confirm it lands in `shopify_orders`.
 
 ## 7. Backups (do not skip)
-Two layers:
+Trace codes live ONLY in this database — Shopify can't rebuild them, so a lost
+DB means every printed QR is a dead link forever. Three layers:
+
 - **Proxmox scheduled backups** of VM 107 — ask Sanjaya (the handover flags this).
-- **Nightly DB dump, copied off-site.** On the VM:
+- **Pre-migration one-off** — always take a dump right before `migrate deploy`:
 ```bash
-sudo tee /usr/local/bin/backup-db.sh >/dev/null <<'SH'
-#!/bin/bash
-set -e
-cd /opt/stclairs
-STAMP=$(date +%F_%H%M)
-source .env
-docker compose exec -T db mariadb-dump -u root -p"$DB_ROOT_PASSWORD" "$DB_NAME" \
-  | gzip > /var/backups/stclairs_$STAMP.sql.gz
-find /var/backups -name 'stclairs_*.sql.gz' -mtime +14 -delete
-# TODO: copy the dump OFF the VM (rclone / aws s3 cp to a cloud bucket)
-SH
-sudo mkdir -p /var/backups && sudo chmod +x /usr/local/bin/backup-db.sh
-echo "30 2 * * * root /usr/local/bin/backup-db.sh" | sudo tee /etc/cron.d/stclairs-backup
+cd /opt/stclairs && source .env
+docker compose exec -T db mariadb-dump -u root -p"$DB_ROOT_PASSWORD" \
+  --single-transaction --quick --routines --triggers --events "$DB_NAME" \
+  | gzip > ~/before-migration_$(date +%F_%H%M).sql.gz
+gzip -t ~/before-migration_*.sql.gz && ls -lh ~/before-migration_*.sql.gz   # must pass + be meaningfully large
 ```
-**Test a restore before go-live** — a backup you've never restored is not a backup.
+- **Nightly DB dump, verified + copied off-site.** Use the hardened, version-controlled
+  script `scripts/backup-db.sh` (verifies integrity + size before a dump counts, and
+  only prunes old backups after a verified new one exists). Install it on the VM:
+```bash
+# choose the off-site destination first and set it in .env (rsync/scp target or NAS path):
+#   BACKUP_OFFSITE_TARGET=backup@10.0.255.x:/backups/stclairs/
+sudo install -m 0755 /opt/stclairs/scripts/backup-db.sh /usr/local/bin/backup-db.sh
+sudo mkdir -p /var/backups/stclairs
+echo "30 2 * * * root /usr/local/bin/backup-db.sh >> /var/log/stclairs-backup.log 2>&1" \
+  | sudo tee /etc/cron.d/stclairs-backup
+sudo /usr/local/bin/backup-db.sh    # run once now; check it logs "backup OK" + a real size
+```
+
+**Test a restore before go-live** — a backup you've never restored is a file you
+*hope* is a backup. Restore the latest dump into a scratch DB and sanity-check it:
+```bash
+cd /opt/stclairs && source .env
+LATEST=$(ls -t /var/backups/stclairs/stclairs_*.sql.gz | head -1)
+docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS restore_test; CREATE DATABASE restore_test;"
+gunzip -c "$LATEST" | docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" restore_test
+docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" restore_test \
+  -e "SELECT COUNT(*) AS orders FROM shopify_orders; SHOW TABLES;"   # numbers look right?
+docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" -e "DROP DATABASE restore_test;"
+```
 
 ## 8. Redeploy (after the first time)
 ```bash

@@ -11,6 +11,7 @@
 
 const prisma = require("../config/prisma");
 const { normalizeCartToken } = require("../lib/cartToken");
+const { ensureTraceCode, markDispatched } = require("../lib/traceCodeStore");
 
 // Parse the webhook body from the RAW bytes with a bigint-aware parser. Express's
 // global express.json() already parsed req.body with plain JSON.parse, which
@@ -56,6 +57,25 @@ function toDecimal(value) {
 // wrap them in Number()/BigInt() — either would round the trailing digits.
 function toStringId(value) {
   return value === undefined || value === null ? null : String(value);
+}
+
+// Pull the dispatch date out of an orders/fulfilled payload. An order can be
+// fulfilled in several shipments, so we take the EARLIEST fulfillment — the
+// date the order first went out — and fall back to the order's own timestamps
+// if Shopify sent no usable fulfillment record.
+function extractDispatchedAt(payload) {
+  const times = (Array.isArray(payload.fulfillments) ? payload.fulfillments : [])
+    .map((f) => f && f.created_at)
+    .filter(Boolean)
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()));
+
+  if (times.length > 0) {
+    return new Date(Math.min(...times.map((d) => d.getTime())));
+  }
+
+  const fallback = payload.updated_at ? new Date(payload.updated_at) : null;
+  return fallback && !Number.isNaN(fallback.getTime()) ? fallback : new Date();
 }
 
 // Write the order and its line items. Upsert throughout: orders/create,
@@ -212,6 +232,16 @@ const ordersPaid = makeWebhookHandler("orders/paid", async (payload) => {
       create: { cart_token: cartToken },
     });
   }
+
+  // Mint the traceability code LAST, after the order and the cart-status write
+  // have committed. Each statement above auto-commits, so if code generation
+  // throws, the customer-facing checkout flow is already safely persisted and
+  // only the (idempotent) trace work is retried.
+  //
+  // A failure here deliberately fails the whole delivery: every step in this
+  // handler is idempotent, so Shopify's retry is harmless, and a loud retry is
+  // far better than an order that silently ships with no code on its label.
+  await ensureTraceCode(payload.id);
 });
 
 // POST /api/webhooks/shopify/orders-updated
@@ -222,10 +252,27 @@ const ordersUpdated = makeWebhookHandler("orders/updated", async (payload) => {
   await persistOrder(payload);
 });
 
+// POST /api/webhooks/shopify/orders-fulfilled
+// Fires when an order ships. Records the dispatch date shown on the public
+// trace page.
+const ordersFulfilled = makeWebhookHandler("orders/fulfilled", async (payload) => {
+  await persistOrder(payload);
+
+  // Safety net: an order can reach us fulfilled without us having seen its
+  // orders/paid delivery (a missed event, or a backfill of orders placed
+  // before the webhook was registered). ensureTraceCode is idempotent, so this
+  // either adopts the existing code or mints the one that never got created.
+  await ensureTraceCode(payload.id);
+
+  await markDispatched(payload.id, extractDispatchedAt(payload));
+});
+
 module.exports = {
   ordersCreate,
   ordersPaid,
   ordersUpdated,
+  ordersFulfilled,
   persistOrder,
   extractBlendId,
+  extractDispatchedAt,
 };

@@ -28,6 +28,10 @@ const OPTIONAL = [
   "CONTACT_TO",
   // TeaMatrix machine feed key(s); feed returns 503 until set.
   "MACHINE_API_KEYS",
+  // Public traceability site, e.g. https://tea-details.crownandleaf.uk — this
+  // is what the QR encodes. Trace codes are still generated without it; only
+  // the QR endpoint is disabled (503) until it is set.
+  "TRACE_BASE_URL",
 ];
 
 function validateEnv() {

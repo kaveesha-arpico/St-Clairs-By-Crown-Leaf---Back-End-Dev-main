@@ -32,6 +32,10 @@ const OPTIONAL = [
   // is what the QR encodes. Trace codes are still generated without it; only
   // the QR endpoint is disabled (503) until it is set.
   "TRACE_BASE_URL",
+  // Comma-separated grades shown on the public trace page during the pilot,
+  // e.g. "Golden Tips". UNSET MEANS NO GATING — every grade is shown, which is
+  // the intended post-pilot state.
+  "TRACE_PILOT_GRADES",
 ];
 
 function validateEnv() {

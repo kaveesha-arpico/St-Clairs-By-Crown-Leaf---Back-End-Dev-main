@@ -2,8 +2,8 @@
 
 REST API for the St. Clair's / Crown Leaf tea business. It covers two areas:
 
-1. **Supply-chain management** — plantations, fields, factories, batches, inventory, locations, products.
-2. **E-commerce** — customer accounts, orders, addresses, custom tea blends, and a Shopify storefront integration (product sync, checkout, payment webhooks).
+1. **E-commerce** — customer accounts, orders, addresses, custom tea blends, and a Shopify storefront integration (product sync, checkout, payment webhooks).
+2. **Tea traceability** — every jar gets its own QR trace code, minted when a pack run is created, linking that jar back to its estate, factory and packed date — and to the online order it shipped in, once scanned at packing. See [FRONTEND_TRACEABILITY.md](FRONTEND_TRACEABILITY.md) for the full API contract.
 
 ## Tech stack
 
@@ -110,11 +110,15 @@ npm run db:pull  # re-introspect the DB into schema.prisma
 
 - `POST /api/auth/signup` and `POST /api/auth/login` are public. Login returns a JWT.
 - Send it as `Authorization: Bearer <token>` on protected routes.
-- **Protected (JWT required):** the admin/CRUD resources — `customers`, `addresses`,
-  `orders`, `order-addresses`, `plantation`, `field`, `factory`, `batch`, `inventory`,
-  `location`, `product`.
+- **Protected (customer JWT):** `customers`, `addresses`, `orders`, `order-addresses`.
+- **Staff only:** everything under `/api/admin/*`. Staff log in at
+  `POST /api/staff/auth/login` and receive a token carrying `typ: "staff"`; a customer
+  token is correctly signed but is rejected with **403** on these routes. Accounts are
+  created with `scripts/createStaffUser.js` — there is deliberately no staff signup
+  endpoint. Role `admin` additionally sees customer names.
 - **Public:** auth, storefront (`checkout`, tea options/products, Shopify product listing,
-  `cart-status`) and the Shopify `payment-webhook` (verified by HMAC, not JWT).
+  `cart-status`), the Shopify webhooks (verified by HMAC, not JWT), and the traceability
+  `GET /trace/:code` + `GET /qr/:code.png`.
 
 ## API overview
 
@@ -129,7 +133,12 @@ All routes are prefixed with `/api`. Admin resources follow standard CRUD:
 | Addresses | CRUD on `/addresses`, `GET /addresses/customer/:customerId` |
 | Orders | CRUD on `/orders` |
 | Order↔Address | `POST /order-addresses`, `GET /order-addresses/:orderId`, `DELETE /order-addresses/:orderId/:addressId` |
-| Supply chain | CRUD on `/plantation`, `/field`, `/factory`, `/batch`, `/inventory`, `/location`, `/product` |
+| Staff auth | `POST /staff/auth/login`, `GET /staff/auth/me` |
+| Traceability (admin) | CRUD on `/admin/estates`, `/admin/factories`, `/admin/lots`, `/admin/pack-runs` (POST mints one code per jar); `GET /admin/pack-runs/by-code/:code`; `GET`/`POST /admin/pack-runs/:id/codes`; `GET /admin/pack-runs/:id/labels.pdf` |
+| Packing (admin) | `GET`/`POST /admin/orders/:orderId/allocations` (scan jar codes), `DELETE /admin/orders/:orderId/allocations/:code` |
+| Orders (admin) | `GET /admin/orders?code=&order_number=`, `GET /admin/orders/:orderId/customer` |
+| Traceability (public) | `GET /trace/:code`, `GET /qr/:code.png`, `GET /qr/:code.svg` |
+| Product details (admin) | `GET /admin/product-info`, `GET`/`PUT`/`DELETE /admin/product-info/:shopifyProductId` |
 | Tea blends | `GET /tea-options`, `POST /create-custom-blend`, `GET /custom-blends/:ref` |
 | Tea products | `POST /tea-product-create`, `GET /get-tea-products`, `GET /get-tea-shopify-products`, `GET /get-tea-shopify-products-variants` |
 | Storefront catalog | `GET /storefront/products` |

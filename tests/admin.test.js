@@ -87,9 +87,16 @@ const ADMIN_ROUTES = [
   ["GET", "/api/admin/pack-runs"],
   ["POST", "/api/admin/pack-runs"],
   ["GET", "/api/admin/pack-runs/by-code/PRT-A"],
+  ["GET", "/api/admin/pack-runs/1/codes"],
+  ["POST", "/api/admin/pack-runs/1/codes"],
+  ["GET", "/api/admin/pack-runs/1/labels.pdf"],
+  ["GET", "/api/admin/product-info"],
+  ["GET", "/api/admin/product-info/7700000000099"],
+  ["PUT", "/api/admin/product-info/7700000000099"],
   ["GET", "/api/admin/orders"],
   ["GET", "/api/admin/orders/123/allocations"],
   ["POST", "/api/admin/orders/123/allocations"],
+  ["DELETE", "/api/admin/orders/123/allocations/K7M2QP9XTR4B"],
 ];
 
 test("no token -> 401 on every admin route", async () => {

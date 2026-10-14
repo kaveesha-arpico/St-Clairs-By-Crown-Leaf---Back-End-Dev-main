@@ -115,6 +115,17 @@ exports.renderQr = async (req, res) => {
     "Cache-Control": "public, max-age=31536000, immutable",
     // Offer a sensible filename when staff click the download link in admin.
     "Content-Disposition": `inline; filename="trace-${code}.${extension}"`,
+    // helmet() sets Cross-Origin-Resource-Policy: same-origin on every response,
+    // which makes browsers refuse to RENDER this image inside an <img> on any
+    // other origin — the admin site, or the trace page. The bytes download fine;
+    // it is the embed that is blocked, which makes it a confusing failure.
+    //
+    // Relaxed here only, rather than globally via helmet's options: every other
+    // response on this API carries order data, and widening the policy for all
+    // of them to fix one image would be a poor trade. This endpoint is already
+    // public, performs no database lookup and returns a picture of a URL, so
+    // there is nothing here to protect.
+    "Cross-Origin-Resource-Policy": "cross-origin",
   });
   return res.send(body);
 };

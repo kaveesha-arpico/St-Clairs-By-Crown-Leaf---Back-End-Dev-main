@@ -12,6 +12,8 @@ const lot = require("../controllers/lotController");
 const packRun = require("../controllers/packRunController");
 const packing = require("../controllers/packingController");
 const orders = require("../controllers/adminOrderController");
+const productInfo = require("../controllers/productTraceController");
+const labels = require("../controllers/labelController");
 
 // Every admin route lives in this one file, and the staff gate is applied here
 // once, to the whole router — rather than per-route or spread across a file per
@@ -54,10 +56,23 @@ router.post("/admin/pack-runs", validate(admin.packRunCreate), asyncHandler(pack
 router.put("/admin/pack-runs/:id", validate([...admin.idParam, ...admin.packRunUpdate]), asyncHandler(packRun.updatePackRun));
 router.delete("/admin/pack-runs/:id", validate(admin.idParam), asyncHandler(packRun.deletePackRun));
 
-// ---- Packing (order -> pack run allocations) ----
+// ---- Trace codes on a run (one per jar) + printable labels ----
+router.get("/admin/pack-runs/:id/codes", validate(admin.idParam), asyncHandler(packRun.listCodes));
+router.post("/admin/pack-runs/:id/codes", validate([...admin.idParam, ...admin.packRunAddCodes]), asyncHandler(packRun.addCodes));
+router.get("/admin/pack-runs/:id/labels.pdf", validate(admin.idParam), asyncHandler(labels.packRunLabelsPdf));
+
+// ---- Product trace details (Ingredients, Package Weight, reorder link) ----
+// Keyed by Shopify product id (a string), so these do not use the numeric
+// idParam. PUT upserts — there is no POST, because the key comes from Shopify.
+router.get("/admin/product-info", asyncHandler(productInfo.listProductInfo));
+router.get("/admin/product-info/:shopifyProductId", validate(admin.shopifyProductIdParam), asyncHandler(productInfo.getProductInfo));
+router.put("/admin/product-info/:shopifyProductId", validate([...admin.shopifyProductIdParam, ...admin.productInfoUpsert]), asyncHandler(productInfo.upsertProductInfo));
+router.delete("/admin/product-info/:shopifyProductId", validate(admin.shopifyProductIdParam), asyncHandler(productInfo.deleteProductInfo));
+
+// ---- Packing (scan jars into an order's lines) ----
 router.get("/admin/orders/:orderId/allocations", asyncHandler(packing.getOrderAllocations));
-router.post("/admin/orders/:orderId/allocations", validate(admin.allocations), asyncHandler(packing.createAllocations));
-router.delete("/admin/allocations/:id", validate(admin.idParam), asyncHandler(packing.deleteAllocation));
+router.post("/admin/orders/:orderId/allocations", validate(admin.scans), asyncHandler(packing.recordScans));
+router.delete("/admin/orders/:orderId/allocations/:code", asyncHandler(packing.removeScan));
 
 // ---- Orders ----
 router.get("/admin/orders", asyncHandler(orders.listOrders));

@@ -200,6 +200,21 @@ test("QR honours a clamped size parameter", async () => {
   }
 });
 
+test("QR is embeddable cross-origin", async () => {
+  // helmet() sets Cross-Origin-Resource-Policy: same-origin globally, which
+  // makes browsers refuse to RENDER this image in an <img> on the admin site or
+  // the trace page — the bytes download fine, only the embed is blocked, which
+  // makes it a confusing failure to diagnose. The QR route overrides it.
+  const res = await request("GET", "/api/qr/K7M2QP9XTR4B.png");
+  assert.strictEqual(res.headers["cross-origin-resource-policy"], "cross-origin");
+});
+
+test("the CORP override does NOT leak to other endpoints", async () => {
+  // Everything else returns order data and must stay same-origin.
+  const res = await request("GET", "/api/trace/ZZZZZZZZZZZZ");
+  assert.strictEqual(res.headers["cross-origin-resource-policy"], "same-origin");
+});
+
 test("QR response is cacheable forever", async () => {
   const res = await request("GET", "/api/qr/K7M2QP9XTR4B.png");
   assert.match(res.headers["cache-control"] || "", /immutable/);

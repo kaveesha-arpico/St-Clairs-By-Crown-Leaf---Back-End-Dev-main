@@ -256,31 +256,67 @@ const admin = {
     optionalString("grade").isLength({ max: 100 }),
   ],
 
+  // quantity_packed is REQUIRED on create: it is the number of trace codes
+  // minted, one per jar. A run with no codes would be jars with no labels.
   packRunCreate: [
     requiredString("pack_run_code").isLength({ max: 50 }),
     requiredInt("lot_id"),
     body("packed_date").isISO8601().withMessage("packed_date must be a date (YYYY-MM-DD)"),
     optionalString("shopify_product_id").isLength({ max: 32 }),
     optionalString("sku").isLength({ max: 100 }),
-    body("quantity_packed").optional({ nullable: true }).isInt({ min: 0 }),
+    body("quantity_packed")
+      .isInt({ min: 1, max: 10000 })
+      .withMessage("quantity_packed must be between 1 and 10000 (one trace code is minted per unit)"),
   ],
+  // quantity_packed is deliberately absent: it tracks codes minted, and is
+  // changed only by minting more (POST /pack-runs/:id/codes).
   packRunUpdate: [
     optionalString("pack_run_code").isLength({ min: 1, max: 50 }),
     body("lot_id").optional().isInt({ min: 1 }),
     body("packed_date").optional().isISO8601(),
     optionalString("shopify_product_id").isLength({ max: 32 }),
     optionalString("sku").isLength({ max: 100 }),
-    body("quantity_packed").optional({ nullable: true }).isInt({ min: 0 }),
+  ],
+  packRunAddCodes: [
+    body("count")
+      .isInt({ min: 1, max: 10000 })
+      .withMessage("count must be between 1 and 10000"),
   ],
 
-  // Several scans submitted together. Quantities must be positive: a zero or
-  // negative allocation would pass the "not over-allocated" check while
-  // recording a link to a pack run that contributed nothing.
-  allocations: [
-    body("allocations").isArray({ min: 1 }).withMessage("allocations must be a non-empty array"),
-    body("allocations.*.line_item_id").notEmpty().withMessage("line_item_id is required"),
-    body("allocations.*.pack_run_code").notEmpty().withMessage("pack_run_code is required"),
-    body("allocations.*.quantity").isInt({ min: 1 }).withMessage("quantity must be at least 1"),
+  // Shopify product id as a route param: a STRING, not an integer. Shopify ids
+  // exceed JS Number's safe range, so idParam's isInt() would both reject valid
+  // ids and invite a rounding bug.
+  shopifyProductIdParam: [
+    param("shopifyProductId")
+      .isString()
+      .bail()
+      .matches(/^[0-9]{1,32}$/)
+      .withMessage("shopifyProductId must be a numeric Shopify product id"),
+  ],
+
+  productInfoUpsert: [
+    optionalString("title").isLength({ max: 255 }),
+    optionalString("ingredients").isLength({ max: 500 }),
+    body("package_weight_g")
+      .optional({ nullable: true })
+      .isInt({ min: 0 })
+      .withMessage("package_weight_g must be a whole number of grams"),
+    body("product_url")
+      .optional({ nullable: true, checkFalsy: true })
+      .isURL({ require_protocol: true })
+      .withMessage("product_url must be a full URL including https://")
+      .isLength({ max: 500 }),
+  ],
+
+  // Several jar scans submitted together. No quantity: a jar is one unit.
+  scans: [
+    body("scans").isArray({ min: 1 }).withMessage("scans must be a non-empty array"),
+    body("scans.*.line_item_id").notEmpty().withMessage("line_item_id is required"),
+    body("scans.*.code").notEmpty().withMessage("code is required"),
+    // Opt-in escape hatch for packing a jar whose product does not match the
+    // ordered line. Must be a real boolean: a stray "false" string would
+    // otherwise read as truthy and silently defeat the check.
+    body("scans.*.allow_product_mismatch").optional().isBoolean(),
   ],
 };
 

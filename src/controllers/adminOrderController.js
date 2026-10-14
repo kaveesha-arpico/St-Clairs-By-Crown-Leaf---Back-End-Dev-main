@@ -10,24 +10,16 @@
 const prisma = require("../config/prisma");
 const { adminGraphQL } = require("../lib/shopifyAdmin");
 const { normalizeTraceCode, isValidTraceCode } = require("../lib/traceCode");
+const { toDateOnly } = require("../lib/dates");
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
-function qrUrl(code) {
-  const base = (process.env.TRACE_BASE_URL || "").trim();
-  // The QR endpoint lives on this API, not on the trace site; TRACE_BASE_URL is
-  // only what gets encoded INTO the image. Returning a relative path lets the
-  // admin site resolve it against whichever API origin it is already talking
-  // to, so this works in dev and production without extra configuration.
-  return base ? `/api/qr/${code}.png` : null;
-}
-
 // GET /api/admin/orders?code=K7M2QP9XTR4B&order_number=1043&limit=50
 //
-// `code` is the support path: a customer emails "my code is X and the page is
-// broken" and staff need to find that order. Shopify cannot answer that query,
-// because the code only exists here.
+// `code` is the support path: a customer emails "my jar's code is X and the
+// page is broken" and staff need to find the order that jar went out in.
+// Shopify cannot answer that query, because the code only exists here.
 exports.listOrders = async (req, res) => {
   const { code, order_number } = req.query;
   const limit = Math.min(
@@ -44,7 +36,8 @@ exports.listOrders = async (req, res) => {
     if (!isValidTraceCode(normalized)) {
       return res.status(200).json({ count: 0, orders: [] });
     }
-    where.trace_code = { code: normalized };
+    // The order that contains the line that contains this jar.
+    where.line_items = { some: { trace_codes: { some: { code: normalized } } } };
   }
 
   if (order_number) {
@@ -61,15 +54,7 @@ exports.listOrders = async (req, res) => {
       financial_status: true,
       fulfillment_status: true,
       shopify_created_at: true,
-      trace_code: {
-        select: {
-          code: true,
-          status: true,
-          dispatched_at: true,
-          scan_count: true,
-          first_scanned_at: true,
-        },
-      },
+      dispatched_at: true,
       line_items: {
         select: {
           line_item_id: true,
@@ -77,24 +62,35 @@ exports.listOrders = async (req, res) => {
           variant_title: true,
           sku: true,
           quantity: true,
-          allocations: { select: { quantity: true } },
+          trace_codes: {
+            select: {
+              code: true,
+              mismatch_override: true,
+              pack_run: { select: { pack_run_code: true, packed_date: true } },
+            },
+          },
         },
       },
     },
   });
 
   const rows = orders.map((order) => {
-    const items = order.line_items.map((line) => {
-      const allocated = line.allocations.reduce((n, a) => n + a.quantity, 0);
-      return {
-        line_item_id: line.line_item_id,
-        title: line.title,
-        variant_title: line.variant_title,
-        sku: line.sku,
-        quantity: line.quantity,
-        allocated,
-      };
-    });
+    const items = order.line_items.map((line) => ({
+      line_item_id: line.line_item_id,
+      title: line.title,
+      variant_title: line.variant_title,
+      sku: line.sku,
+      quantity: line.quantity,
+      allocated: line.trace_codes.length,
+      // The jars packed into this line so far.
+      codes: line.trace_codes.map((c) => ({
+        code: c.code,
+        pack_run_code: c.pack_run.pack_run_code,
+        packed_date: toDateOnly(c.pack_run.packed_date),
+        mismatch_override: c.mismatch_override,
+        qr_url: `/api/qr/${c.code}.png`,
+      })),
+    }));
 
     return {
       shopify_order_id: order.shopify_order_id,
@@ -102,11 +98,7 @@ exports.listOrders = async (req, res) => {
       financial_status: order.financial_status,
       fulfillment_status: order.fulfillment_status,
       created_at: order.shopify_created_at,
-      trace_code: order.trace_code ? order.trace_code.code : null,
-      trace_status: order.trace_code ? order.trace_code.status : null,
-      dispatched_at: order.trace_code ? order.trace_code.dispatched_at : null,
-      scan_count: order.trace_code ? order.trace_code.scan_count : null,
-      qr_url: order.trace_code ? qrUrl(order.trace_code.code) : null,
+      dispatched_at: order.dispatched_at,
       // Drives the "needs packing" filter in the admin UI.
       fully_packed:
         items.length > 0 && items.every((i) => i.allocated >= i.quantity),

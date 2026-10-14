@@ -1,70 +1,78 @@
 // traceCodeStore.js
 // Persistence for traceability codes. The pure generation/validation logic
 // lives in traceCode.js; this module is the only place that writes the table.
+//
+// Codes are per JAR: minted in bulk when a pack run is created, one per unit
+// packed, and linked to an order line later when the packer scans the jar.
 
 const prisma = require("../config/prisma");
 const { generateTraceCode } = require("./traceCode");
 
-// Attempts allowed when a freshly generated code collides with an existing one.
-// At 30^12 codes a single collision is already vanishingly unlikely, so three
-// attempts is less a retry budget than a guard against an exhausted entropy
-// source silently returning the same bytes forever.
-const MAX_GENERATION_ATTEMPTS = 3;
+// Upper bound per mint. Far above any real run; it exists so a typo like
+// 480000 cannot sit generating codes for a minute.
+const MAX_CODES_PER_MINT = 10000;
+
+// Collision attempts before giving up. At 30^12 possible codes a single
+// collision is already vanishingly unlikely, so this is a guard against a
+// broken entropy source returning the same bytes forever, not a retry budget.
+const MAX_ROUNDS = 5;
 
 /**
- * Return the trace code for an order, creating one if it has none.
+ * Mint `count` fresh codes against a pack run.
  *
- * Idempotent and safe under concurrent webhook deliveries. Shopify may deliver
- * orders/paid more than once (and orders/fulfilled may arrive for an order
- * whose paid event we missed), so this must never mint a second code for an
- * order that already has one — the unique index on shopify_order_id guarantees
- * that, and a loser of the race simply re-reads the winner's row.
+ * Inserts in one statement with duplicates skipped, then reads back which of
+ * the generated codes actually landed on this run. Any shortfall (a code that
+ * collided with an existing row) is regenerated and inserted again. Collisions
+ * are effectively impossible, but the loop makes the function honest about
+ * returning exactly `count` codes rather than assuming it.
  *
- * The order row must already exist: trace_codes has a foreign key to
- * shopify_orders, so callers persist the order first.
- *
- * @param {string} shopifyOrderId - Shopify order id, as a string (never Number).
- * @returns {Promise<object>} the trace_codes row.
+ * @param {number} packRunId
+ * @param {number} count
+ * @param {object} [client] - a Prisma transaction client, when minting as part
+ *   of a larger transaction (e.g. creating the run itself).
+ * @returns {Promise<string[]>} the codes created, in no particular order.
  */
-async function ensureTraceCode(shopifyOrderId) {
-  const orderId = String(shopifyOrderId);
-
-  const existing = await prisma.trace_codes.findUnique({
-    where: { shopify_order_id: orderId },
-  });
-  if (existing) return existing;
-
-  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
-    try {
-      return await prisma.trace_codes.create({
-        data: { code: generateTraceCode(), shopify_order_id: orderId },
-      });
-    } catch (err) {
-      // P2002 = unique constraint violation. Two different constraints can
-      // raise it here and they need opposite responses, so rather than parsing
-      // the error's target (which varies by adapter) we just ask the database
-      // which case we are in:
-      //
-      //   - the ORDER now has a code  -> a concurrent delivery won the race;
-      //                                  adopt its code, do not generate again.
-      //   - the order still has none  -> the generated CODE collided with an
-      //                                  unrelated row; generate a new one.
-      if (err.code !== "P2002") throw err;
-
-      const winner = await prisma.trace_codes.findUnique({
-        where: { shopify_order_id: orderId },
-      });
-      if (winner) return winner;
-    }
+async function mintCodes(packRunId, count, client = prisma) {
+  const wanted = Number(count);
+  if (!Number.isInteger(wanted) || wanted < 1 || wanted > MAX_CODES_PER_MINT) {
+    throw new Error(
+      `Can mint between 1 and ${MAX_CODES_PER_MINT} codes at a time, not ${count}.`
+    );
   }
 
-  throw new Error(
-    `Failed to generate a unique trace code for order ${orderId} after ${MAX_GENERATION_ATTEMPTS} attempts.`
-  );
+  const minted = [];
+
+  for (let round = 1; round <= MAX_ROUNDS && minted.length < wanted; round++) {
+    const shortfall = wanted - minted.length;
+    const batch = new Set();
+    while (batch.size < shortfall) batch.add(generateTraceCode());
+    const candidates = [...batch];
+
+    await client.trace_codes.createMany({
+      data: candidates.map((code) => ({ code, pack_run_id: packRunId })),
+      // A collision with a code on another run is skipped rather than failing
+      // the whole insert; the read-back below finds the gap.
+      skipDuplicates: true,
+    });
+
+    const landed = await client.trace_codes.findMany({
+      where: { code: { in: candidates }, pack_run_id: packRunId },
+      select: { code: true },
+    });
+    for (const row of landed) minted.push(row.code);
+  }
+
+  if (minted.length < wanted) {
+    throw new Error(
+      `Minted ${minted.length} of ${wanted} codes after ${MAX_ROUNDS} rounds — entropy source may be broken.`
+    );
+  }
+
+  return minted;
 }
 
 /**
- * Record the dispatch date for an order's trace code.
+ * Record the dispatch date for an order.
  *
  * Only fills an empty dispatched_at, so a partially-fulfilled order (which
  * fires orders/fulfilled once per fulfillment) keeps the date it FIRST went
@@ -74,12 +82,12 @@ async function ensureTraceCode(shopifyOrderId) {
  * @param {Date} dispatchedAt
  * @returns {Promise<boolean>} true if this call set the date.
  */
-async function markDispatched(shopifyOrderId, dispatchedAt) {
-  const result = await prisma.trace_codes.updateMany({
+async function markOrderDispatched(shopifyOrderId, dispatchedAt) {
+  const result = await prisma.shopify_orders.updateMany({
     where: { shopify_order_id: String(shopifyOrderId), dispatched_at: null },
     data: { dispatched_at: dispatchedAt },
   });
   return result.count > 0;
 }
 
-module.exports = { ensureTraceCode, markDispatched, MAX_GENERATION_ATTEMPTS };
+module.exports = { mintCodes, markOrderDispatched, MAX_CODES_PER_MINT };

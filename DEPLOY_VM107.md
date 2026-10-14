@@ -122,6 +122,84 @@ docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" restore_test \
 docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" -e "DROP DATABASE restore_test;"
 ```
 
+## 7b. Traceability setup (first deploy of the trace feature)
+
+Two things the deploy steps above do NOT do. Miss either and the feature is
+silently half-working.
+
+**1. Trace settings in `.env`** (then `docker compose up -d` to pick them up):
+
+```bash
+# The URL a scanned QR opens: <TRACE_BASE_URL>/<CODE>. The site does not need to
+# exist yet — this string is simply what gets encoded into the image. Without
+# it, GET /api/qr/:code returns 503 and no QR can be produced.
+TRACE_BASE_URL=https://tea-details.crownandleaf.uk
+
+# Grades shown on the public page. During the pilot, set this so orders of other
+# grades show "details coming soon" instead of a half-filled page. LEAVE UNSET
+# to show every grade (the post-pilot state).
+TRACE_PILOT_GRADES=Golden Tips
+```
+
+Also add the trace site to `FRONTEND_URL` (comma-separated) or the browser will
+block the page from calling the API — it loads but shows nothing.
+
+**2. At least one staff account.** There is no signup endpoint; the admin site
+cannot be used until an account exists:
+
+```bash
+docker compose run --rm backend node scripts/createStaffUser.js   someone@crownandleaf.uk "Their Name" admin
+```
+
+The generated password is printed ONCE. Re-run to reset a lost one. Roles are
+`staff` (full admin API) and `admin` (also sees customer names).
+
+**3. Register the `orders/fulfilled` webhook** in Shopify (Settings ->
+Notifications -> Webhooks) pointing at
+`https://api.crownandleaf.uk/api/webhooks/shopify/orders-fulfilled`, event
+"Order fulfillment", format JSON, API version matching `SHOPIFY_API_VERSION`
+(**not** `unstable`). Without it, dispatch dates stay empty.
+
+### Migration `20261009000000_per_jar_trace_codes` is destructive — back up first
+
+Trace codes moved from one-per-order to one-per-jar. The migration DROPS the
+old `trace_codes` and `order_allocations` tables and rebuilds `trace_codes`
+around pack runs. The rows it discards are order-level codes that were never
+printed on anything (confirmed 2026-10-09), so nothing in the world identifies
+them. Still: take the usual pre-migration dump before `npm run migrate`.
+
+After this deploy the `orders/paid` webhook no longer mints codes. Codes are
+created by `POST /api/admin/pack-runs` and printed with
+`GET /api/admin/pack-runs/:id/labels.pdf`.
+
+### Demo data for development
+
+A fresh database has no orders, so there is nothing to pack or trace. To create
+a complete worked example — estate, factory, lot, two pack runs, a test order
+half-packed, and a trace code:
+
+```bash
+docker compose run --rm backend node scripts/seedTraceDemo.js
+node scripts/seedTraceDemo.js --clean    # remove it again
+```
+
+Everything it creates is prefixed `DEMO-` / "Demo ". It refuses to run when
+NODE_ENV=production unless given `--force`.
+
+### Revoking a trace code
+
+If a QR is misprinted or a code has to be taken out of circulation, mark it
+revoked — the public page then reports "not found" exactly as it would for a
+code that never existed:
+
+```bash
+docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" "$DB_NAME"   -e "UPDATE trace_codes SET status='revoked' WHERE code='K7M2QP9XTR4B';"
+```
+
+Set it back to `'active'` to restore it. Never DELETE the row: the code is
+printed on something already in a customer's hands, and deleting it frees it to
+be issued again to a different order.
+
 ## 8. Redeploy (after the first time)
 ```bash
 cd /opt/stclairs

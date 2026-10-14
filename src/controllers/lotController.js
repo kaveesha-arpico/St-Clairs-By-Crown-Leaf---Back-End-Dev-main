@@ -4,6 +4,7 @@
 // Every route here is behind protect + requireStaff.
 
 const prisma = require("../config/prisma");
+const { packRunDates } = require("../lib/dates");
 
 // Estate + factory names are what staff actually read in the admin list; the
 // raw ids are meaningless on screen.
@@ -47,7 +48,7 @@ exports.getLot = async (req, res) => {
   if (!lot) {
     return res.status(404).json({ message: "Lot not found." });
   }
-  res.status(200).json(lot);
+  res.status(200).json({ ...lot, pack_runs: lot.pack_runs.map(packRunDates) });
 };
 
 // POST /api/admin/lots

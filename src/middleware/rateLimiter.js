@@ -46,4 +46,24 @@ const contactLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === "test",
 });
 
-module.exports = { authLimiter, apiLimiter, contactLimiter };
+// Public traceability lookups. Tighter than the app-wide limiter because this
+// endpoint is unauthenticated, hits several tables per call, and is the one
+// place someone could try to walk the code space.
+//
+// Guessing a code is already hopeless (30^12 ~ 5.3e17 combinations), so this is
+// less about the codes and more about the database: without it, a trivial
+// script could keep the server busy for free. A real customer scans a label a
+// handful of times, so 60 per quarter-hour is far beyond normal use.
+const traceLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 60, // lookups per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    verified: false,
+    message: "Too many lookups. Please wait a moment and try again.",
+  },
+  skip: () => process.env.NODE_ENV === "test",
+});
+
+module.exports = { authLimiter, apiLimiter, contactLimiter, traceLimiter };

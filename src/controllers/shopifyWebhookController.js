@@ -11,7 +11,7 @@
 
 const prisma = require("../config/prisma");
 const { normalizeCartToken } = require("../lib/cartToken");
-const { ensureTraceCode, markDispatched } = require("../lib/traceCodeStore");
+const { markOrderDispatched } = require("../lib/traceCodeStore");
 
 // Parse the webhook body from the RAW bytes with a bigint-aware parser. Express's
 // global express.json() already parsed req.body with plain JSON.parse, which
@@ -233,15 +233,9 @@ const ordersPaid = makeWebhookHandler("orders/paid", async (payload) => {
     });
   }
 
-  // Mint the traceability code LAST, after the order and the cart-status write
-  // have committed. Each statement above auto-commits, so if code generation
-  // throws, the customer-facing checkout flow is already safely persisted and
-  // only the (idempotent) trace work is retried.
-  //
-  // A failure here deliberately fails the whole delivery: every step in this
-  // handler is idempotent, so Shopify's retry is harmless, and a loud retry is
-  // far better than an order that silently ships with no code on its label.
-  await ensureTraceCode(payload.id);
+  // Trace codes are NOT minted here any more. They are per jar, created when a
+  // pack run is created, and linked to this order's lines when the packer
+  // scans the jars into the box.
 });
 
 // POST /api/webhooks/shopify/orders-updated
@@ -257,14 +251,7 @@ const ordersUpdated = makeWebhookHandler("orders/updated", async (payload) => {
 // trace page.
 const ordersFulfilled = makeWebhookHandler("orders/fulfilled", async (payload) => {
   await persistOrder(payload);
-
-  // Safety net: an order can reach us fulfilled without us having seen its
-  // orders/paid delivery (a missed event, or a backfill of orders placed
-  // before the webhook was registered). ensureTraceCode is idempotent, so this
-  // either adopts the existing code or mints the one that never got created.
-  await ensureTraceCode(payload.id);
-
-  await markDispatched(payload.id, extractDispatchedAt(payload));
+  await markOrderDispatched(payload.id, extractDispatchedAt(payload));
 });
 
 module.exports = {

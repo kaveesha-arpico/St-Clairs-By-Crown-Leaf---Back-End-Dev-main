@@ -65,6 +65,13 @@ function request(method, path, { headers = {}, raw, body } = {}) {
 const validToken = () =>
   jwt.sign({ userId: 1 }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
+// The CRUD routes are staff-only (see admin.test.js); a shopper's token stops
+// at 403 before validation runs, so validation checks need a staff token.
+const staffToken = () =>
+  jwt.sign({ staffId: 1, role: "staff", typ: "staff" }, process.env.JWT_SECRET, {
+    expiresIn: "1h",
+  });
+
 test("protected route without token -> 401", async () => {
   const res = await request("GET", "/api/orders");
   assert.strictEqual(res.status, 401);
@@ -118,7 +125,7 @@ test("malformed JSON -> 400 with friendly message", async () => {
 
 test("bad :id param -> 400", async () => {
   const res = await request("GET", "/api/customers/abc", {
-    headers: { Authorization: `Bearer ${validToken()}` },
+    headers: { Authorization: `Bearer ${staffToken()}` },
   });
   assert.strictEqual(res.status, 400);
 });

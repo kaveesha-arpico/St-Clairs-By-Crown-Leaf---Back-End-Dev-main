@@ -1,18 +1,14 @@
 const prisma = require("../config/prisma");
+const { validateBlend } = require("../lib/blendRules");
 
-// Human-readable, traceable reference for a blend: BLEND-<year>-<6-digit id>.
-// Derived from the numeric custom_blends.id (the source of truth), so no extra
-// column is needed and a reference always reverses back to one recipe.
-function blendRef(id, createdAt) {
-  const year = (createdAt ? new Date(createdAt) : new Date()).getFullYear();
-  return `BLEND-${year}-${String(id).padStart(6, "0")}`;
-}
+// Prisma returns DECIMAL(5,2) as a Decimal whose JSON form drops trailing zeros
+// ("75" for 75.00). Percentages are always presented with two decimals, which
+// is what the machine recipe and the storefront expect.
+const pct = (d) => (d === null || d === undefined ? null : Number(d).toFixed(2));
 
-// Accepts "BLEND-2026-000042", "000042", or "42" and returns the numeric id.
-function parseBlendId(ref) {
-  const match = String(ref).match(/(\d+)\s*$/);
-  return match ? parseInt(match[1], 10) : NaN;
-}
+// BLEND-<year>-<6-digit id> helpers live in lib/blendRef.js, shared with the
+// order webhook, which reads the ref back off each order line for the machine.
+const { blendRef, parseBlendId } = require("../lib/blendRef");
 
 // Cart-line attributes Shopify carries through to the order. Phase 3's order
 // webhook reads the "Blend ID" key back off each order line, which is how
@@ -33,14 +29,16 @@ const getTeaOptions = async (req, res) => {
     // Only offer active options; retired ones stay in the table (for historical
     // recipe lookups) but are hidden from the blend builder. Stable id order.
     const [baseTeas, spices] = await Promise.all([
+      // `code` is the permanent identifier the TeaMatrix machine matches on;
+      // `name` is display text and may change.
       prisma.base_teas.findMany({
         where: { is_active: true },
-        select: { id: true, name: true },
+        select: { id: true, code: true, name: true },
         orderBy: { id: "asc" },
       }),
       prisma.spices.findMany({
         where: { is_active: true },
-        select: { id: true, name: true },
+        select: { id: true, code: true, name: true },
         orderBy: { id: "asc" },
       }),
     ]);
@@ -59,46 +57,73 @@ const getTeaOptions = async (req, res) => {
 };
 
 const createCustomBlend = async (req, res) => {
-  const { baseTeaId, quantity, spices } = req.body;
+  const { baseTeaId, quantity, baseTeaPercentage, spices } = req.body;
 
-  if (!baseTeaId || !quantity || !Array.isArray(spices) || spices.length === 0) {
+  if (!baseTeaId || !quantity || !Array.isArray(spices)) {
     return res
       .status(400)
       .json({ success: false, message: "Please provide all required fields." });
   }
 
+  // Recipe rules (spec v1.1 §3) are checked before anything touches the
+  // database, so a bad recipe never reaches a transaction. `error_code` lets
+  // the frontend show a specific message.
+  const check = validateBlend({ quantity, baseTeaPercentage, spices });
+  if (!check.ok) {
+    return res
+      .status(400)
+      .json({ success: false, error_code: check.code, message: check.message });
+  }
+  const recipe = check.normalized;
+
   try {
     const result = await prisma.$transaction(async (tx) => {
+      // Ingredients must exist AND be offered. A retired ingredient would pass
+      // the foreign-key check but the machine no longer carries it.
+      const baseTea = await tx.base_teas.findUnique({
+        where: { id: baseTeaId },
+        select: { name: true, is_active: true },
+      });
+      if (!baseTea || !baseTea.is_active) {
+        throw Object.assign(new Error("Invalid base tea."), { code: "INVALID_BASE_TEA" });
+      }
+      const spiceIds = recipe.spices.map((s) => s.id);
+      const spiceRows = spiceIds.length
+        ? await tx.spices.findMany({
+            where: { id: { in: spiceIds } },
+            select: { id: true, name: true, is_active: true },
+          })
+        : [];
+      const spiceById = new Map(spiceRows.map((s) => [s.id, s]));
+      const unknown = spiceIds.find((id) => !(spiceById.get(id) && spiceById.get(id).is_active));
+      if (unknown !== undefined) {
+        throw Object.assign(new Error(`Invalid spice ${unknown}.`), { code: "INVALID_SPICE" });
+      }
+
       const created = await tx.custom_blends.create({
-        data: { base_tea_id: baseTeaId, quantity },
+        data: {
+          base_tea_id: baseTeaId,
+          quantity: recipe.quantity,
+          base_tea_percentage: recipe.baseTeaPercentage,
+        },
         select: { id: true, created_at: true },
       });
 
-      await tx.blend_spices.createMany({
-        data: spices.map((spice) => ({
-          blend_id: created.id,
-          spice_id: spice.id,
-          percentage: spice.percentage,
-        })),
-      });
-
-      // Resolve names for the human-readable cart-line attributes. The FK checks
-      // above have already passed, so these rows exist.
-      const baseTea = await tx.base_teas.findUnique({
-        where: { id: baseTeaId },
-        select: { name: true },
-      });
-      const spiceRows = await tx.spices.findMany({
-        where: { id: { in: spices.map((s) => s.id) } },
-        select: { id: true, name: true },
-      });
-      const nameById = new Map(spiceRows.map((s) => [s.id, s.name]));
+      if (recipe.spices.length > 0) {
+        await tx.blend_spices.createMany({
+          data: recipe.spices.map((spice) => ({
+            blend_id: created.id,
+            spice_id: spice.id,
+            percentage: spice.percentage,
+          })),
+        });
+      }
 
       return {
         created,
-        baseTeaName: baseTea?.name || "Unknown",
-        spiceList: spices.map((s) => ({
-          name: nameById.get(s.id) || `Spice ${s.id}`,
+        baseTeaName: baseTea.name,
+        spiceList: recipe.spices.map((s) => ({
+          name: spiceById.get(s.id).name,
           percentage: s.percentage,
         })),
       };
@@ -117,12 +142,20 @@ const createCustomBlend = async (req, res) => {
       data: {
         blendId: result.created.id, // kept for backward compatibility
         blendRef: ref,
+        baseTeaPercentage: recipe.baseTeaPercentage,
         // Attach these to the Shopify cart line (POST /storefront/cart/lines)
         // so the recipe travels with the order.
         lineAttributes,
       },
     });
   } catch (error) {
+    // Unknown or retired ingredient (checked inside the transaction).
+    if (error.code === "INVALID_BASE_TEA" || error.code === "INVALID_SPICE") {
+      return res
+        .status(400)
+        .json({ success: false, error_code: error.code, message: error.message });
+    }
+
     console.error(error);
 
     // Foreign key violation -> invalid base tea or spice id.
@@ -151,8 +184,10 @@ const getCustomBlend = async (req, res) => {
   const blend = await prisma.custom_blends.findUnique({
     where: { id },
     include: {
-      base_teas: { select: { name: true } },
-      blend_spices: { include: { spices: { select: { name: true } } } },
+      base_teas: { select: { code: true, name: true } },
+      blend_spices: {
+        include: { spices: { select: { code: true, name: true } } },
+      },
     },
   });
 
@@ -166,11 +201,14 @@ const getCustomBlend = async (req, res) => {
       blendId: blend.id,
       blendRef: blendRef(blend.id, blend.created_at),
       baseTea: blend.base_teas?.name || null,
+      baseTeaCode: blend.base_teas?.code || null,
+      baseTeaPercentage: pct(blend.base_tea_percentage),
       quantity: blend.quantity,
       createdAt: blend.created_at,
       spices: blend.blend_spices.map((bs) => ({
+        code: bs.spices?.code || null,
         name: bs.spices?.name || null,
-        percentage: bs.percentage,
+        percentage: pct(bs.percentage),
       })),
     },
   });

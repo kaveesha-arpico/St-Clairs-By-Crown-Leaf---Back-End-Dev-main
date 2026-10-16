@@ -157,13 +157,20 @@ const orderAddress = {
 };
 
 // ---- Tea blend ----
+// Shape checks only. The recipe rules (weight range, percentages summing to
+// exactly 100.00, spice count, minimum grams) live in src/lib/blendRules.js so
+// they can be unit-tested and so the controller reports a specific error code.
 const teaBlend = {
   createCustomBlend: [
     requiredInt("baseTeaId"),
     body("quantity").isInt({ min: 1 }).withMessage("quantity must be a positive integer"),
-    body("spices").isArray({ min: 1 }).withMessage("spices must be a non-empty array"),
+    // Optional for pre-v1.1 clients, which sent only the spices; the base
+    // tea's share is then derived as the remainder.
+    body("baseTeaPercentage").optional().isFloat({ gt: 0, max: 100 }).withMessage("baseTeaPercentage must be greater than 0 and at most 100"),
+    // May be empty: a tea-only blend is a valid recipe.
+    body("spices").isArray().withMessage("spices must be an array"),
     body("spices.*.id").isInt({ min: 1 }).withMessage("each spice.id must be a positive integer"),
-    body("spices.*.percentage").isFloat({ min: 0, max: 100 }).withMessage("each spice.percentage must be 0-100"),
+    body("spices.*.percentage").isFloat({ gt: 0, max: 100 }).withMessage("each spice.percentage must be greater than 0 and at most 100"),
   ],
   getCustomBlend: [
     param("ref").notEmpty().withMessage("blend reference is required"),

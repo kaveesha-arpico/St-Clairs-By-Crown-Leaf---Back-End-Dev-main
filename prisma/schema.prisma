@@ -25,6 +25,10 @@ model addresses {
 model base_teas {
   id            Int             @id @default(autoincrement())
   name          String          @db.VarChar(100)
+  // Permanent machine-facing identifier (e.g. STRATHSPEY_BOPF). The TeaMatrix
+  // machine matches ingredients on this code only, so `name` can be reworded
+  // freely. A code never changes once shipped and is never reused.
+  code          String          @unique(map: "uq_base_teas_code") @db.VarChar(40)
   // Soft-delete flag: retired options are marked inactive (never deleted or
   // renumbered) so historical recipes referencing them still read back.
   is_active     Boolean         @default(true)
@@ -46,7 +50,11 @@ model blend_spices {
 model custom_blends {
   id           Int            @id @default(autoincrement())
   base_tea_id  Int
+  // Grams per unit, 1..200 (see src/lib/blendRules.js).
   quantity     Int
+  // The base tea's share. Stored explicitly so the recipe the machine gets is
+  // exactly what was validated, not an implied remainder.
+  base_tea_percentage Decimal @db.Decimal(5, 2)
   created_at   DateTime?      @default(now()) @db.Timestamp(0)
   blend_spices blend_spices[]
   base_teas    base_teas      @relation(fields: [base_tea_id], references: [id], onUpdate: Restrict, map: "fk_blend_base_tea")
@@ -170,6 +178,8 @@ model shopify_store_products {
 model spices {
   id           Int            @id @default(autoincrement())
   name         String         @db.VarChar(100)
+  // Permanent machine-facing identifier (e.g. CINNAMON_CHIPS) — see base_teas.
+  code         String         @unique(map: "uq_spices_code") @db.VarChar(40)
   // Soft-delete flag: retired ingredients are marked inactive (never deleted or
   // renumbered) so historical recipes referencing them still read back.
   is_active    Boolean        @default(true)
@@ -238,6 +248,71 @@ model shopify_orders {
 // /api/machine/orders/status). Append-only log: one row per (order, status), so
 // out-of-order arrivals and retries are naturally idempotent and no status ever
 // overwrites another (e.g. a mid-blend cancellation still records `completed`).
+// ---------------------------------------------------------------------------
+// TeaMatrix machine orders (spec v1.1 §4). One row per CUSTOM-BLEND line item
+// on a Shopify order — shelf products never reach the machine. Written by the
+// order webhooks in the same transaction as shopify_orders (payment side) and
+// by the machine through its status endpoint (machine side). The two sides
+// never write each other's columns, so a retried webhook cannot reset machine
+// progress and the machine cannot alter payment state.
+//
+// No foreign key to shopify_orders on purpose (per spec): the row must survive
+// test-data cleanup of shopify_orders and is keyed by the Shopify line id.
+model machine_orders {
+  id                        BigInt                 @id @default(autoincrement())
+  shopify_order_id          String                 @db.VarChar(32)
+  shopify_line_item_id      String                 @unique(map: "uq_machine_orders_line") @db.VarChar(32)
+  order_number              String?                @db.VarChar(32)
+  // custom_blends.id, NULL when the Blend ID on the line did not resolve.
+  blend_id                  Int?
+  blend_ref                 String?                @db.VarChar(32)
+  // First name + initial only ("Amal P."). Never email/address/phone.
+  customer_display_name     String?                @db.VarChar(100)
+  // How many of this blend were bought; total_weight_g is PER UNIT.
+  units                     Int                    @default(1)
+  total_weight_g            Int?
+  // Frozen at creation from custom_blends + ingredients; never rebuilt (§4.3).
+  recipe_json               Json?
+  // §5.3; NULL = valid. Rows with an error are hidden from the machine.
+  validation_error          String?                @db.VarChar(64)
+  // Test / UAT orders never appear in /pending (§5.2).
+  is_test                   Boolean                @default(false)
+  // §8.1, forward-only (§5.4). Written by webhooks only.
+  payment_status            String                 @db.VarChar(24)
+  payment_status_updated_at DateTime               @db.DateTime(3)
+  paid_at                   DateTime?              @db.DateTime(3)
+  // §8.2. Written by the machine only, through POST /api/machine/orders/:id/status.
+  machine_status            String                 @default("new") @db.VarChar(24)
+  machine_status_updated_at DateTime?              @db.DateTime(3)
+  machine_ref               String?                @db.VarChar(64)
+  machine_status_reason     String?                @db.VarChar(255)
+  created_at                DateTime               @default(now()) @db.DateTime(3)
+  updated_at                DateTime               @default(now()) @updatedAt @db.DateTime(3)
+  events                    machine_order_events[]
+
+  // /pending: paid, uncollected, valid, not test — ordered by paid_at, id.
+  @@index([payment_status, machine_status, validation_error, is_test, paid_at, id], map: "ix_machine_orders_pending")
+  // /changes pages on (payment_status_updated_at, id).
+  @@index([payment_status_updated_at, id], map: "ix_machine_orders_changes")
+  @@index([shopify_order_id], map: "ix_machine_orders_order")
+}
+
+// History: one row each time either status changes (§4.2). Answers "where is
+// my order?" without overloading machine_orders.
+model machine_order_events {
+  id               BigInt         @id @default(autoincrement())
+  machine_order_id BigInt
+  // 'payment' | 'machine'
+  kind             String         @db.VarChar(16)
+  from_status      String?        @db.VarChar(24)
+  to_status        String         @db.VarChar(24)
+  detail           String?        @db.VarChar(255)
+  created_at       DateTime       @default(now()) @db.DateTime(3)
+  order            machine_orders @relation(fields: [machine_order_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_moe_order")
+
+  @@index([machine_order_id, id], map: "ix_moe_order")
+}
+
 model machine_order_statuses {
   id               Int            @id @default(autoincrement())
   shopify_order_id String         @db.VarChar(32)

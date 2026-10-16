@@ -244,6 +244,30 @@ test("orders-fulfilled webhook without HMAC -> 401", async () => {
   assert.strictEqual(res.status, 401);
 });
 
+test("orders-cancelled webhook without HMAC -> 401", async () => {
+  const res = await request("POST", "/api/webhooks/shopify/orders-cancelled", {
+    headers: { "Content-Type": "application/json" },
+    raw: JSON.stringify({ id: TEST_ORDER_ID }),
+  });
+  assert.strictEqual(res.status, 401);
+});
+
+test("orders-cancelled webhook with valid HMAC passes verification", async () => {
+  const payload = JSON.stringify({ id: TEST_ORDER_ID, cancelled_at: "2026-10-16T09:00:00Z" });
+  const hmac = crypto
+    .createHmac("sha256", process.env.SHOPIFY_WEBHOOK_SECRET)
+    .update(Buffer.from(payload))
+    .digest("base64");
+  const res = await request("POST", "/api/webhooks/shopify/orders-cancelled", {
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Hmac-Sha256": hmac,
+    },
+    raw: payload,
+  });
+  assert.notStrictEqual(res.status, 401);
+});
+
 test("orders-fulfilled webhook with valid HMAC passes verification", async () => {
   const payload = JSON.stringify({ id: TEST_ORDER_ID, fulfillments: [] });
   const hmac = crypto

@@ -3,20 +3,33 @@ const {
   getMachineOrders,
   postMachineOrderStatus,
 } = require("../controllers/machineController");
+const {
+  getPendingOrders,
+  getChanges,
+  postStatus,
+} = require("../controllers/machineOrdersController");
 const asyncHandler = require("../middleware/asyncHandler");
 const machineAuth = require("../middleware/machineAuth");
+const { machineLimiter } = require("../middleware/rateLimiter");
 
 const router = express.Router();
 
-// Tea-dispensing machine endpoints. Authenticated by their own API key
-// (machineAuth), not JWT — so they sit above the global auth gate.
-// Read: poll the order feed.
-router.get("/machine/orders", machineAuth, asyncHandler(getMachineOrders));
-// Write-back: the machine reports an order's status (append-only, idempotent).
-router.post(
-  "/machine/orders/status",
-  machineAuth,
-  asyncHandler(postMachineOrderStatus)
-);
+// TeaMatrix machine API. Authenticated by its own API key (+ optional IP
+// allowlist) in machineAuth, not JWT — so this router sits above the global
+// auth gate AND above the global rate limiter in app.js: the machine polls two
+// endpoints every 15 s, which alone exceeds the 300/15 min public limit, so it
+// gets its own, more generous limiter here (spec v1.1 §6.3).
+router.use("/machine", machineLimiter, machineAuth);
+
+// ---- Spec v1.1 (§7): machine_orders, one row per custom-blend line ----
+router.get("/machine/orders/pending", asyncHandler(getPendingOrders));
+router.get("/machine/orders/changes", asyncHandler(getChanges));
+router.post("/machine/orders/:id/status", asyncHandler(postStatus));
+
+// ---- Legacy (v1.0): whole-order feed + per-order status ----
+// Kept until the machine has cut over to the §7 endpoints, then removed along
+// with machine_order_statuses (spec §10 step 8). Nothing polls these today.
+router.get("/machine/orders", asyncHandler(getMachineOrders));
+router.post("/machine/orders/status", asyncHandler(postMachineOrderStatus));
 
 module.exports = router;

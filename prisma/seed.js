@@ -2,72 +2,72 @@
 // Reference data for the custom-blend lookup tables that GET /api/tea-options
 // reads from. Run with `npm run db:seed` (or `npx prisma db seed`).
 //
-// Idempotent and non-destructive: it inserts any missing names and reconciles
-// the `is_active` flag on the listed rows. It never deletes or renumbers rows,
-// because custom_blends / custom_orders reference them by id — retiring an
-// option means marking it inactive, not removing it.
+// Idempotent and non-destructive. Rows are matched on `code`, the permanent
+// identifier the TeaMatrix machine uses to recognise an ingredient — never on
+// `name`, which is display text and may be reworded. Re-running inserts any
+// missing codes and reconciles name + is_active on the listed rows. It never
+// deletes or renumbers rows: custom_blends / blend_spices reference them by id
+// (ON DELETE RESTRICT), so retiring an ingredient means `is_active: false`.
+//
+// The 12 codes below are the agreed TeaMatrix catalogue (spec v1.1 §2). A code
+// never changes once shipped and is never reused.
 
 const prisma = require("../src/config/prisma");
 
-// The "base tea" options the blend builder offers. Each combines an estate with
-// a grade (e.g. "Moray BOP"). The NAME is what the storefront resolves to a
-// Custom Blend Tea variant on Shopify (matched by name) and what's written onto
-// the order as the "Base Tea" attribute — so these strings must match the
-// Shopify variant names exactly.
+// Base teas: an estate plus a grade. The NAME is what the storefront resolves
+// to a Custom Blend Tea variant on Shopify (matched by name) and what's written
+// onto the order as the "Base Tea" attribute — so it must match the Shopify
+// variant names exactly. The CODE is what the machine matches on.
 const BASE_TEAS = [
-  { name: "Strathspey BOPF", is_active: true },
-  { name: "Maskeliya Silver Tips", is_active: true },
-  { name: "Glentilt Golden Tips", is_active: true },
-  { name: "Moray BOP", is_active: true },
-  { name: "Laxapana PEKOE", is_active: true },
+  { code: "STRATHSPEY_BOPF", name: "Strathspey BOPF", is_active: true },
+  { code: "LAXAPANA_PEKOE", name: "Laxapana PEKOE", is_active: true },
+  { code: "MORAY_BOP", name: "Moray BOP", is_active: true },
+  { code: "MASKELIYA_SILVER_TIPS", name: "Maskeliya Silver Tips", is_active: true },
+  { code: "GLENTILT_GOLDEN_TIPS", name: "Glentilt Golden Tips", is_active: true },
 ];
 
-// Blend ingredients. Only the 7 active ones are OFFERED by the builder
-// (GET /tea-options filters on is_active). The other 7 are kept as inactive
-// rows — never deleted or renumbered — so historical recipes still read back by
-// id. Order is preserved so a fresh deploy assigns the same ids as production
-// (Ginger=2, Cinnamon=3, Lemongrass=9, Orange Peel=11 … Jasmine Petals=14).
+// Blend ingredients. "Spices" is a misnomer — the list includes peels and
+// flowers. They live in one list on purpose: GET /tea-options returns
+// { baseTeas, spices } and the frontend destructures exactly those two keys.
 //
-// "Spices" is a misnomer — the last entries are peels and flowers. They live in
-// this one list on purpose: GET /tea-options returns { baseTeas, spices } and
-// the frontend destructures exactly those two keys. Bergamot is deliberately
-// absent: it is a liquid flavouring dosed on a finished blend, not a proportion
+// Only these 7 are offered. Older rows (Cardamom, Clove, Black Pepper, Nutmeg,
+// Star Anise, Fennel, Peppermint) were retired with is_active=false and keep
+// their ids in existing databases for historical recipes; they are deliberately
+// NOT listed here so a fresh seed never brings them back. Bergamot is absent
+// because it is a liquid flavouring dosed on a finished blend, not a proportion
 // of it, so it cannot be expressed as { id, percentage }.
 const SPICES = [
-  { name: "Cardamom", is_active: false },
-  { name: "Ginger", is_active: true },
-  { name: "Cinnamon", is_active: true },
-  { name: "Clove", is_active: false },
-  { name: "Black Pepper", is_active: false },
-  { name: "Nutmeg", is_active: false },
-  { name: "Star Anise", is_active: false },
-  { name: "Fennel", is_active: false },
-  { name: "Lemongrass", is_active: true },
-  { name: "Peppermint", is_active: false },
-  { name: "Orange Peel", is_active: true },
-  { name: "Lemon Peel", is_active: true },
-  { name: "Rose Petals", is_active: true },
-  { name: "Jasmine Petals", is_active: true },
+  { code: "CINNAMON_CHIPS", name: "Cinnamon", is_active: true },
+  { code: "GINGER_PIECES", name: "Ginger", is_active: true },
+  { code: "ORANGE_PEEL", name: "Orange Peel", is_active: true },
+  { code: "LEMON_PEEL", name: "Lemon Peel", is_active: true },
+  { code: "LEMONGRASS", name: "Lemongrass", is_active: true },
+  { code: "ROSE_PETALS", name: "Rose Petals", is_active: true },
+  { code: "JASMINE_PETALS", name: "Jasmine Petals", is_active: true },
 ];
 
-// Insert any missing names, then reconcile is_active on every listed row so
-// re-running brings the DB to the declared state without deleting/renumbering.
+// Insert any missing codes, then reconcile name + is_active on every listed row
+// so re-running brings the DB to the declared state without deleting rows.
 async function seedTable(model, label, items) {
-  const existing = await model.findMany({ select: { name: true } });
-  const present = new Set(existing.map((row) => row.name));
-  const missing = items.filter((i) => !present.has(i.name));
+  const existing = await model.findMany({ select: { code: true } });
+  const present = new Set(existing.map((row) => row.code));
+  const missing = items.filter((i) => !present.has(i.code));
 
   if (missing.length > 0) {
     await model.createMany({
-      data: missing.map((i) => ({ name: i.name, is_active: i.is_active })),
+      data: missing.map((i) => ({
+        code: i.code,
+        name: i.name,
+        is_active: i.is_active,
+      })),
     });
   }
 
   let reconciled = 0;
   for (const i of items) {
     const res = await model.updateMany({
-      where: { name: i.name },
-      data: { is_active: i.is_active },
+      where: { code: i.code },
+      data: { name: i.name, is_active: i.is_active },
     });
     reconciled += res.count;
   }
@@ -75,7 +75,7 @@ async function seedTable(model, label, items) {
   const activeCount = items.filter((i) => i.is_active).length;
   console.log(
     `${label}: ${present.size + missing.length} rows ` +
-      `(inserted ${missing.length}, ${activeCount} active) — flags reconciled on ${reconciled}`
+      `(inserted ${missing.length}, ${activeCount} active) — reconciled ${reconciled}`
   );
 }
 
@@ -84,11 +84,16 @@ async function main() {
   await seedTable(prisma.spices, "spices", SPICES);
 }
 
-main()
-  .catch((err) => {
-    console.error("Seed failed:", err);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// Exported so tests can check the catalogue without a database.
+module.exports = { BASE_TEAS, SPICES };
+
+if (require.main === module) {
+  main()
+    .catch((err) => {
+      console.error("Seed failed:", err);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

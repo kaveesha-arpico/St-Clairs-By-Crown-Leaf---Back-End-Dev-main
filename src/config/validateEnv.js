@@ -26,8 +26,17 @@ const OPTIONAL = [
   "GRAPH_CLIENT_SECRET",
   "GRAPH_SENDER",
   "CONTACT_TO",
-  // TeaMatrix machine feed key(s); feed returns 503 until set.
+  // TeaMatrix machine API key(s); the machine API returns 503 until set.
   "MACHINE_API_KEYS",
+  // Optional IP allowlist for the machine API (LAN deployment). Unset = any IP.
+  "MACHINE_ALLOWED_IPS",
+  // Smallest grams of any one ingredient the machine dispenses accurately.
+  // Supplied by the machine team; 0 / unset disables the check.
+  "BLEND_MIN_INGREDIENT_G",
+  // Shopify product id of "Custom Blend Tea". Order lines with this product id
+  // become machine_orders rows for the TeaMatrix machine. Unset while the
+  // custom-blend page is disabled: no line is treated as a blend.
+  "CUSTOM_BLEND_PRODUCT_ID",
   // Public traceability site, e.g. https://tea-details.crownandleaf.uk — this
   // is what the QR encodes. Trace codes are still generated without it; only
   // the QR endpoint is disabled (503) until it is set.

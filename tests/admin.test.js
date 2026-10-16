@@ -90,6 +90,27 @@ const ADMIN_ROUTES = [
   ["GET", "/api/admin/orders"],
   ["GET", "/api/admin/orders/123/allocations"],
   ["POST", "/api/admin/orders/123/allocations"],
+
+  // Back-office CRUD + Shopify admin routes. Until 2026-10 these sat behind
+  // `protect` alone, which any storefront signup satisfies — so every shopper
+  // could list, edit and delete all customers, addresses and orders, read
+  // Shopify orders with PII, and create products on the live store.
+  ["GET", "/api/customers"],
+  ["GET", "/api/customers/1"],
+  ["PUT", "/api/customers/1"],
+  ["DELETE", "/api/customers/1"],
+  ["GET", "/api/addresses"],
+  ["GET", "/api/addresses/customer/1"],
+  ["GET", "/api/orders"],
+  ["GET", "/api/orders/1"],
+  ["DELETE", "/api/orders/1"],
+  ["GET", "/api/order-addresses/1"],
+  ["GET", "/api/get-all-orders"],
+  ["GET", "/api/get-order-list"],
+  ["POST", "/api/create-shopify-product"],
+  ["GET", "/api/get-shopify-store-products"],
+  ["GET", "/api/get-shopify-products"],
+  ["POST", "/api/tea-product-create"],
 ];
 
 test("no token -> 401 on every admin route", async () => {
@@ -106,6 +127,33 @@ test("a valid CUSTOMER token -> 403 on every admin route", async () => {
   for (const [method, path] of ADMIN_ROUTES) {
     const res = await request(method, path, { token });
     assert.strictEqual(res.status, 403, `${method} ${path} let a customer in`);
+  }
+});
+
+test("a STAFF token gets past the gate on every admin route", async () => {
+  // Guards against over-gating: 500 (no database in tests) or 400 (no body)
+  // are fine; 401/403 would mean staff are locked out of their own tools.
+  const token = staffToken();
+  for (const [method, path] of ADMIN_ROUTES) {
+    const res = await request(method, path, { token });
+    assert.notStrictEqual(res.status, 401, `${method} ${path} rejected staff`);
+    assert.notStrictEqual(res.status, 403, `${method} ${path} rejected staff`);
+  }
+});
+
+test("the account portal still works with a CUSTOMER token", async () => {
+  // The portal has its own email-scoped routes, mounted before the staff gate.
+  // It must not be caught by it. 500 is fine (no database); 403 is a regression.
+  const res = await request("GET", "/api/account/orders", { token: customerToken() });
+  assert.notStrictEqual(res.status, 401);
+  assert.notStrictEqual(res.status, 403);
+});
+
+test("storefront reads next to the gated product-create stay public", async () => {
+  for (const path of ["/api/get-tea-products", "/api/tea-options"]) {
+    const res = await request("GET", path);
+    assert.notStrictEqual(res.status, 401, `${path} became private`);
+    assert.notStrictEqual(res.status, 403, `${path} became private`);
   }
 });
 

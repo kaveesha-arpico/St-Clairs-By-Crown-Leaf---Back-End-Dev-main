@@ -12,6 +12,7 @@
 const prisma = require("../config/prisma");
 const { normalizeCartToken } = require("../lib/cartToken");
 const { ensureTraceCode, markDispatched } = require("../lib/traceCodeStore");
+const { syncMachineOrders } = require("../lib/machineOrderStore");
 
 // Parse the webhook body from the RAW bytes with a bigint-aware parser. Express's
 // global express.json() already parsed req.body with plain JSON.parse, which
@@ -145,6 +146,15 @@ async function persistOrder(payload) {
         create: { line_item_id: String(item.id), ...itemData },
       });
     }
+
+    // TeaMatrix machine rows (spec v1.1 §5): one per custom-blend line, in the
+    // SAME transaction so an order and its machine rows commit together. Only
+    // the payment side is written here; machine_status belongs to the machine.
+    // Skipped when the payload carries no line_items (a partial body), since
+    // there is nothing to derive a blend from.
+    if (hasLineItems) {
+      await syncMachineOrders(tx, payload);
+    }
   });
 }
 
@@ -252,6 +262,16 @@ const ordersUpdated = makeWebhookHandler("orders/updated", async (payload) => {
   await persistOrder(payload);
 });
 
+// POST /api/webhooks/shopify/orders-cancelled
+// Shopify also re-delivers a cancelled order through orders/updated, but the
+// dedicated topic is registered too so a cancellation never depends on a
+// second subscription being in place. Same persistence path; cancelled_at on
+// the payload drives both shopify_orders.cancelled_at and the machine row's
+// payment_status (§8.1), under the same HMAC check and idempotency wrapper.
+const ordersCancelled = makeWebhookHandler("orders/cancelled", async (payload) => {
+  await persistOrder(payload);
+});
+
 // POST /api/webhooks/shopify/orders-fulfilled
 // Fires when an order ships. Records the dispatch date shown on the public
 // trace page.
@@ -271,6 +291,7 @@ module.exports = {
   ordersCreate,
   ordersPaid,
   ordersUpdated,
+  ordersCancelled,
   ordersFulfilled,
   persistOrder,
   extractBlendId,

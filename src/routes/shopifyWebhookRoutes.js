@@ -3,6 +3,7 @@ const {
   ordersCreate,
   ordersPaid,
   ordersUpdated,
+  ordersCancelled,
   ordersFulfilled,
 } = require("../controllers/shopifyWebhookController");
 const verifyShopifyWebhook = require("../middleware/verifyShopifyWebhook");
@@ -24,6 +25,15 @@ router.post(
   "/webhooks/shopify/orders-updated",
   verifyShopifyWebhook,
   ordersUpdated
+);
+
+// orders/cancelled: cancellations for the machine feed (register in Shopify as
+// "Order cancellation"). orders/updated covers it too; both are subscribed so
+// a cancellation never depends on a single subscription.
+router.post(
+  "/webhooks/shopify/orders-cancelled",
+  verifyShopifyWebhook,
+  ordersCancelled
 );
 
 // orders/fulfilled supplies the dispatch date for the public trace page.

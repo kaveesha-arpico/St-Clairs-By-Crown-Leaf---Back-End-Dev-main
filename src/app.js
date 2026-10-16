@@ -4,6 +4,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 
 const { protect } = require("./middleware/authMiddleware");
+const { requireStaff } = require("./middleware/requireStaff");
 const { apiLimiter } = require("./middleware/rateLimiter");
 const prisma = require("./config/prisma");
 
@@ -107,6 +108,11 @@ app.use(
   })
 );
 
+// TeaMatrix machine API — mounted BEFORE the app-wide limiter because the
+// machine's polling alone would exhaust the public 300/15 min budget; the
+// router applies its own limiter and its own key/IP auth (spec v1.1 §6.3).
+app.use("/api", machineRoutes);
+
 // App-wide rate limit on everything under /api (auth routes add a stricter
 // limiter of their own on top of this).
 app.use("/api", apiLimiter);
@@ -120,7 +126,6 @@ app.use("/api", shopifyRoutes); // Storefront checkout, product listing, webhook
 app.use("/api", shopifyOrderRoutes); // Shopify order listing
 app.use("/api", storefrontRoutes); // Storefront GraphQL catalog (products, cart)
 app.use("/api", shopifyWebhookRoutes); // Shopify order webhooks (HMAC-verified)
-app.use("/api", machineRoutes); // TeaMatrix order feed (machine API key, read-only)
 app.use("/api", qrRoutes); // Traceability QR images (public so <img> tags work)
 app.use("/api", staffAuthRoutes); // Staff login for the admin site (rate-limited)
 
@@ -132,6 +137,17 @@ app.use("/api", accountRoutes); // Signed-in customer's own orders (scoped to to
 // Traceability admin API. The router applies requireStaff to everything under
 // /admin, so a customer token gets past `protect` here but no further.
 app.use("/api", adminRoutes);
+
+// ---- STAFF GATE: everything below is back-office CRUD over customer PII ----
+// `protect` only proves the caller holds *a* valid token, and the public signup
+// endpoint hands one to anybody. These routers list, edit and delete every
+// customer, address and order, so a shopper's token must stop here. Gated by
+// path prefix (not a bare app.use) so an unknown URL still 404s rather than
+// 403ing, and so the gate is visibly tied to the routers it covers.
+app.use(
+  ["/api/customers", "/api/addresses", "/api/orders", "/api/order-addresses"],
+  requireStaff
+);
 app.use("/api", customerRoutes);
 app.use("/api", addressRoutes);
 app.use("/api", orderRoutes);

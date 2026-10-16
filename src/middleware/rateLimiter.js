@@ -46,4 +46,21 @@ const contactLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === "test",
 });
 
-module.exports = { authLimiter, apiLimiter, contactLimiter };
+// TeaMatrix machine API (spec v1.1 §6.3). The machine polls /pending and
+// /changes every 15 s (~120 requests per 15 min) plus status posts, so it must
+// not share the 300/15 min public limit. Its router is mounted ABOVE apiLimiter
+// in app.js and carries this limiter instead. Keyed per IP like the others.
+const machineLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1200, // per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    schema_version: 1,
+    error_code: "RATE_LIMITED",
+    message: "Too many requests from the machine. Slow down.",
+  },
+  skip: () => process.env.NODE_ENV === "test",
+});
+
+module.exports = { authLimiter, apiLimiter, contactLimiter, machineLimiter };

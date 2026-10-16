@@ -77,8 +77,10 @@ npm run db:pull                       # = prisma db pull
 
 ### Seeding
 `prisma/seed.js` populates the `base_teas` and `spices` lookup tables that
-`GET /api/tea-options` serves to the blend builder. It only inserts names that
-are missing, so re-running it is a safe no-op.
+`GET /api/tea-options` serves to the blend builder. Rows are matched on their
+permanent `code` (the identifier the TeaMatrix machine uses), so renaming an
+ingredient is a seed edit, and re-running is a safe no-op. Ingredients are
+retired by setting `is_active: false`, never deleted.
 
 ```bash
 npm run db:seed                       # = prisma db seed

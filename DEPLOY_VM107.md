@@ -126,10 +126,19 @@ docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" -e "DROP DATABAS
 ```bash
 cd /opt/stclairs
 git pull
-docker compose build
+docker compose build                              # ALWAYS before migrate/seed
 docker compose run --rm backend npm run migrate   # if there are new migrations
+docker compose run --rm backend npm run db:seed   # if prisma/seed.js changed
 docker compose up -d
 ```
+
+> **Why build comes first:** `docker compose run` executes inside the *current*
+> image. Without a rebuild after `git pull`, migrate and seed run the OLD
+> code and report "no pending migrations" even though new migration files were
+> pulled — and the rebuilt backend then starts against an un-migrated schema.
+> (This happened on 2026-10-16; the fix was simply to re-run migrate + seed
+> after the build.) `docker compose up -d --build` alone does NOT run
+> migrations.
 
 ## Go-live checklist
 - [ ] `.env` complete, `NODE_ENV=production`, `chmod 600`, `DATABASE_URL` uses `@db`

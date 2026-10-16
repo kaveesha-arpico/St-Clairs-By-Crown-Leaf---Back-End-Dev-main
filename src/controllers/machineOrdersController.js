@@ -27,6 +27,26 @@ const MACHINE_STATUSES = new Set([
 ]);
 const TERMINAL = new Set(["completed", "rejected", "cancelled"]);
 
+// Joint-test switch (requested by TeaMatrix, 2026-10-16). Normally test / UAT
+// orders (is_test = 1) never reach the machine (§5.2, §7.1). During a joint
+// test the orders ARE test orders, so this lets /pending include them. Rows
+// keep their honest is_test value; switching this off hides them again at
+// once. Must be unset / false in normal running.
+function includeTestOrders() {
+  return String(process.env.MACHINE_INCLUDE_TEST_ORDERS || "").toLowerCase() === "true";
+}
+
+// The /pending selection (§7.1), exported so the switch is unit-testable.
+function pendingWhere() {
+  const where = {
+    payment_status: "paid",
+    machine_status: "new",
+    validation_error: null,
+  };
+  if (!includeTestOrders()) where.is_test = false;
+  return where;
+}
+
 const PENDING_DEFAULT = 50;
 const PENDING_MAX = 100;
 const CHANGES_DEFAULT = 100;
@@ -61,12 +81,7 @@ const getPendingOrders = async (req, res) => {
   const limit = parseLimit(req.query.limit, PENDING_DEFAULT, PENDING_MAX);
 
   const rows = await prisma.machine_orders.findMany({
-    where: {
-      payment_status: "paid",
-      machine_status: "new",
-      validation_error: null,
-      is_test: false,
-    },
+    where: pendingWhere(),
     orderBy: [{ paid_at: "asc" }, { id: "asc" }],
     take: limit + 1, // one extra to detect has_more
   });
@@ -88,6 +103,9 @@ const getPendingOrders = async (req, res) => {
       ingredients: ingredientsOf(o.recipe_json),
       payment_status: o.payment_status,
       paid_at: iso(o.paid_at),
+      // Only present while the joint-test switch is on, so the machine team can
+      // see which rows would normally be hidden.
+      ...(includeTestOrders() ? { is_test: o.is_test } : {}),
     })),
     has_more,
   });
@@ -256,4 +274,6 @@ module.exports = {
   // exported for tests
   MACHINE_STATUSES,
   TERMINAL,
+  pendingWhere,
+  includeTestOrders,
 };

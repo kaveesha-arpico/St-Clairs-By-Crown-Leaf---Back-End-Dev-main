@@ -30,6 +30,8 @@ const OPTIONAL = [
   "MACHINE_API_KEYS",
   // Optional IP allowlist for the machine API (LAN deployment). Unset = any IP.
   "MACHINE_ALLOWED_IPS",
+  // JOINT TEST ONLY: "true" lets test/UAT orders into /pending. Unset normally.
+  "MACHINE_INCLUDE_TEST_ORDERS",
   // Smallest grams of any one ingredient the machine dispenses accurately.
   // Supplied by the machine team; 0 / unset disables the check.
   "BLEND_MIN_INGREDIENT_G",

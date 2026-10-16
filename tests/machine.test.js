@@ -26,7 +26,7 @@ delete process.env.MACHINE_ALLOWED_IPS; // allowlist tested via normalizeIp + a 
 
 const app = require("../src/app");
 const { normalizeIp } = require("../src/middleware/machineAuth");
-const { MACHINE_STATUSES, TERMINAL } = require("../src/controllers/machineOrdersController");
+const { MACHINE_STATUSES, TERMINAL, pendingWhere, includeTestOrders } = require("../src/controllers/machineOrdersController");
 
 let server;
 let base;
@@ -138,6 +138,23 @@ test("status vocabulary matches §8.2 and `new` cannot be posted", () => {
   );
   assert.ok(!MACHINE_STATUSES.has("new"));
   assert.deepStrictEqual([...TERMINAL].sort(), ["cancelled", "completed", "rejected"]);
+});
+
+test("test orders are hidden from /pending unless the joint-test switch is on", () => {
+  delete process.env.MACHINE_INCLUDE_TEST_ORDERS;
+  assert.strictEqual(includeTestOrders(), false);
+  assert.deepStrictEqual(pendingWhere(), { payment_status: "paid", machine_status: "new", validation_error: null, is_test: false });
+
+  process.env.MACHINE_INCLUDE_TEST_ORDERS = "true";
+  try {
+    assert.strictEqual(includeTestOrders(), true);
+    assert.deepStrictEqual(pendingWhere(), { payment_status: "paid", machine_status: "new", validation_error: null });
+  } finally {
+    delete process.env.MACHINE_INCLUDE_TEST_ORDERS;
+  }
+  // Anything but the literal "true" keeps the filter.
+  process.env.MACHINE_INCLUDE_TEST_ORDERS = "yes";
+  try { assert.strictEqual(includeTestOrders(), false); } finally { delete process.env.MACHINE_INCLUDE_TEST_ORDERS; }
 });
 
 test("IPv4-mapped addresses normalise so the allowlist matches req.ip", () => {

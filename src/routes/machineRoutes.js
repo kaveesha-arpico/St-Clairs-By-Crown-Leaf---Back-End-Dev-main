@@ -1,9 +1,5 @@
 const express = require("express");
 const {
-  getMachineOrders,
-  postMachineOrderStatus,
-} = require("../controllers/machineController");
-const {
   getPendingOrders,
   getChanges,
   postStatus,
@@ -29,10 +25,10 @@ router.post("/machine/orders/:id/status", asyncHandler(postStatus));
 // Addendum 2: one trace link per bottle, posted after the bottle is made.
 router.post("/machine/orders/:id/traceability", asyncHandler(postTraceability));
 
-// ---- Legacy (v1.0): whole-order feed + per-order status ----
-// Kept until the machine has cut over to the §7 endpoints, then removed along
-// with machine_order_statuses (spec §10 step 8). Nothing polls these today.
-router.get("/machine/orders", asyncHandler(getMachineOrders));
-router.post("/machine/orders/status", asyncHandler(postMachineOrderStatus));
+// The v1.0 whole-order feed (GET /machine/orders) and per-order status
+// (POST /machine/orders/status) were removed on 2026-10-26 after TeaMatrix
+// confirmed their poller, and the planned development machine, use only the
+// endpoints above (spec v1.1 §10 step 8). Their table is dropped in migration
+// 20261026000000_drop_legacy_machine_feed.
 
 module.exports = router;

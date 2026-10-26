@@ -76,7 +76,15 @@ The signed-in user's own orders (matched by their account email), newest first.
       "item_count": 1,
       "items": [
         { "title": "Black Tea-Lakshapana", "variant_title": "50g", "sku": "1000",
-          "quantity": 1, "price": "25.00", "is_custom_blend": false }
+          "quantity": 1, "price": "25.00", "is_custom_blend": false,
+          "blend_status": null, "traces": [] },
+        { "title": "Custom Blend Tea", "variant_title": "Laxapana PEKOE", "sku": null,
+          "quantity": 2, "price": "12.50", "is_custom_blend": true,
+          "blend_status": { "stage": "being_made", "label": "Being blended",
+                            "updated_at": "2026-10-16T11:42:40.874Z" },
+          "traces": [
+            { "bottle": 1, "of": 2, "url": "https://trace.crownandleaf.uk/t/7Kq2xM9a" }
+          ] }
       ]
     }
   ],
@@ -88,6 +96,50 @@ The signed-in user's own orders (matched by their account email), newest first.
 - Money fields are **strings** already formatted to 2dp.
 - Only the user's **own** orders are ever returned — the query is scoped to the token's
   email server-side; there's no way to request someone else's.
+
+### Custom-blend lines: `blend_status` and `traces` ✅ live
+
+Both are present on **every** item; on shelf products they are `null` / `[]`.
+
+**`blend_status`** — where the blend is in the tea machine. `null` until the shop's
+machine has seen the order (normally within a minute of payment), so render nothing
+for `null`, not "unknown". `stage` is one of exactly four values; `label` is a
+ready-made English string you may use or replace:
+
+| `stage` | `label` | Meaning |
+|---|---|---|
+| `received` | Order received | Paid; the shop has it; not started |
+| `being_made` | Being blended | The machine is working on it (also while retrying a failed run) |
+| `ready` | Ready | Blended; the shop will dispatch it |
+| `cancelled` | Cancelled | Cancelled/refunded in Shopify, or the shop could not make it |
+
+`updated_at` is when the stage last changed (`null` while `received` and untouched).
+A cancelled or refunded order is `cancelled` whatever the machine did. Do **not**
+infer stage from `financial_status` — use this field.
+
+**`traces`** — "Trace your tea", one entry per **bottle** that has a QR link. A line of
+2 units has up to 2 entries (`bottle` 1 and 2 `of` 2), which can arrive at different
+times. A bottle without a link yet is simply absent — show nothing, not an error.
+- Open `url` in a new tab, exactly as given. Don't rewrite, shorten or proxy it; the
+  QR printed on the bottle holds the same link.
+- Treat `url` as untrusted text when rendering: set `href` from it, never inject it
+  as HTML.
+- Optional: draw a QR from `url` client-side with any QR library; no image is sent.
+- The trace page shows no customer data, so linking to it from a signed-in page leaks
+  nothing.
+
+### Custom-blend lookups now include grams
+
+`GET /api/custom-blends/:ref` (and the create response) carry a `grams` block —
+the recipe resolved against the pack weight, e.g. 37.5 g base + 10 g lemongrass +
+2.5 g rose petals = 50 g. Show those rather than re-deriving from percentages.
+
+### UAT checkouts must be tagged as test orders
+
+The backend hides test orders from the tea machine. On the **UAT** build only, add a
+cart attribute at checkout — `{ key: "source", value: "uat" }` on the cart's
+`attributes` — so a UAT order is never made into real tea. Shopify's own test flag
+and an order tag of `test` also work; the cart attribute is the one the frontend owns.
 
 ## 5. Reorder — `POST /api/account/orders/:id/reorder`  *(Bearer)*
 

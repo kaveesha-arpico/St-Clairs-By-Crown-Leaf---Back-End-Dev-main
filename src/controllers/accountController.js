@@ -9,6 +9,7 @@
 // here unless their email matches a signed-in customer.
 
 const prisma = require("../config/prisma");
+const { blendStage } = require("../lib/customerOrderStage");
 const {
   storefrontGraphQL,
   validateVariants,
@@ -46,16 +47,21 @@ const ORDER_SELECT = {
   },
 };
 
-// Per-bottle trace links for custom-blend lines (TeaMatrix Addendum 2 §6).
-// Keyed by the Shopify line item id; only lines the machine has made have any.
-// Read strictly through this customer-scoped route, never an admin one.
-async function traceLinksByLine(lineItemIds) {
+// What the customer sees per custom-blend line: the stage the blend is at
+// (folded from the machine + payment status, see lib/customerOrderStage.js)
+// and the per-bottle trace links (TeaMatrix Addendum 2 §6). Keyed by the
+// Shopify line item id. Read strictly through this customer-scoped route,
+// never an admin one. Lines the machine has never seen have no entry.
+async function machineInfoByLine(lineItemIds) {
   if (lineItemIds.length === 0) return new Map();
   const rows = await prisma.machine_orders.findMany({
     where: { shopify_line_item_id: { in: lineItemIds } },
     select: {
       shopify_line_item_id: true,
       units: true,
+      payment_status: true,
+      machine_status: true,
+      machine_status_updated_at: true,
       traces: {
         select: { unit_index: true, url: true },
         orderBy: { unit_index: "asc" },
@@ -65,14 +71,20 @@ async function traceLinksByLine(lineItemIds) {
   return new Map(
     rows.map((r) => [
       r.shopify_line_item_id,
-      // One entry per bottle that HAS a link; a bottle without one is simply
-      // absent (shows nothing, not an error).
-      r.traces.map((t) => ({ bottle: t.unit_index, of: r.units, url: t.url })),
+      {
+        blend_status: {
+          ...blendStage(r),
+          updated_at: r.machine_status_updated_at,
+        },
+        // One entry per bottle that HAS a link; a bottle without one is simply
+        // absent (shows nothing, not an error).
+        traces: r.traces.map((t) => ({ bottle: t.unit_index, of: r.units, url: t.url })),
+      },
     ])
   );
 }
 
-function shapeOrder(o, traceMap = new Map()) {
+function shapeOrder(o, machineMap = new Map()) {
   return {
     id: o.shopify_order_id, // string id — used for POST /account/orders/:id/reorder
     order_number: o.order_number,
@@ -91,8 +103,14 @@ function shapeOrder(o, traceMap = new Map()) {
       quantity: li.quantity,
       price: money(li.price),
       is_custom_blend: li.blend_id != null,
-      // "Trace your tea": [{ bottle, of, url }], empty until the machine posts a link.
-      traces: traceMap.get(li.line_item_id) || [],
+      // Custom-blend lines only, once the machine knows about them:
+      //   blend_status: { stage, label, updated_at } — stage is one of
+      //     received | being_made | ready | cancelled
+      //   traces: [{ bottle, of, url }] — "Trace your tea", one per bottle
+      //     that has a link, empty until the machine posts one.
+      // Shelf products and blends the machine hasn't collected: null / [].
+      blend_status: (machineMap.get(li.line_item_id) || {}).blend_status || null,
+      traces: (machineMap.get(li.line_item_id) || {}).traces || [],
     })),
   };
 }
@@ -131,12 +149,12 @@ const getMyOrders = async (req, res) => {
     }),
   ]);
 
-  const traceMap = await traceLinksByLine(
+  const machineMap = await machineInfoByLine(
     rows.flatMap((o) => o.line_items.map((li) => li.line_item_id))
   );
 
   return res.status(200).json({
-    orders: rows.map((o) => shapeOrder(o, traceMap)),
+    orders: rows.map((o) => shapeOrder(o, machineMap)),
     count,
     has_more: offset + rows.length < count,
   });

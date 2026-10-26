@@ -71,7 +71,6 @@ const ROUTES = [
   ["GET", "/api/machine/orders/changes?since=2026-01-01T00:00:00.000Z"],
   ["POST", "/api/machine/orders/1/status"],
   ["POST", "/api/machine/orders/1/traceability"],
-  ["GET", "/api/machine/orders"], // legacy, still mounted until cutover
 ];
 
 test("no key -> 401 UNAUTHORIZED on every machine route", async () => {
@@ -139,6 +138,17 @@ test("/:id/traceability with a non-numeric id -> 404 NOT_FOUND without a databas
   });
   assert.strictEqual(res.status, 404);
   assert.strictEqual(res.body.error_code, "NOT_FOUND");
+});
+
+test("the v1.0 feed and per-order status endpoint are gone (cutover 2026-10-26)", async () => {
+  // With a valid machine key these fall through the machine router to whatever
+  // answers next (the JWT gate, a 404, or another router's validation) — never
+  // a 200 and never the old feed body.
+  for (const [m, p] of [["GET", "/api/machine/orders?limit=1"], ["POST", "/api/machine/orders/status"]]) {
+    const res = await request(m, p, { key: "test-machine-key-1", body: {} });
+    assert.notStrictEqual(res.status, 200, `${m} ${p} still answers 200`);
+    assert.strictEqual(res.body.orders, undefined, `${m} ${p} still serves the legacy feed`);
+  }
 });
 
 test("status vocabulary matches §8.2 and `new` cannot be posted", () => {

@@ -8,6 +8,7 @@ const {
   getChanges,
   postStatus,
 } = require("../controllers/machineOrdersController");
+const { postTraceability } = require("../controllers/machineTraceController");
 const asyncHandler = require("../middleware/asyncHandler");
 const machineAuth = require("../middleware/machineAuth");
 const { machineLimiter } = require("../middleware/rateLimiter");
@@ -25,6 +26,8 @@ router.use("/machine", machineLimiter, machineAuth);
 router.get("/machine/orders/pending", asyncHandler(getPendingOrders));
 router.get("/machine/orders/changes", asyncHandler(getChanges));
 router.post("/machine/orders/:id/status", asyncHandler(postStatus));
+// Addendum 2: one trace link per bottle, posted after the bottle is made.
+router.post("/machine/orders/:id/traceability", asyncHandler(postTraceability));
 
 // ---- Legacy (v1.0): whole-order feed + per-order status ----
 // Kept until the machine has cut over to the §7 endpoints, then removed along

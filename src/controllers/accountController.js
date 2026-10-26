@@ -35,6 +35,7 @@ const ORDER_SELECT = {
   shopify_created_at: true,
   line_items: {
     select: {
+      line_item_id: true, // internal join key only — not exposed
       title: true,
       variant_title: true,
       sku: true,
@@ -45,7 +46,33 @@ const ORDER_SELECT = {
   },
 };
 
-function shapeOrder(o) {
+// Per-bottle trace links for custom-blend lines (TeaMatrix Addendum 2 §6).
+// Keyed by the Shopify line item id; only lines the machine has made have any.
+// Read strictly through this customer-scoped route, never an admin one.
+async function traceLinksByLine(lineItemIds) {
+  if (lineItemIds.length === 0) return new Map();
+  const rows = await prisma.machine_orders.findMany({
+    where: { shopify_line_item_id: { in: lineItemIds } },
+    select: {
+      shopify_line_item_id: true,
+      units: true,
+      traces: {
+        select: { unit_index: true, url: true },
+        orderBy: { unit_index: "asc" },
+      },
+    },
+  });
+  return new Map(
+    rows.map((r) => [
+      r.shopify_line_item_id,
+      // One entry per bottle that HAS a link; a bottle without one is simply
+      // absent (shows nothing, not an error).
+      r.traces.map((t) => ({ bottle: t.unit_index, of: r.units, url: t.url })),
+    ])
+  );
+}
+
+function shapeOrder(o, traceMap = new Map()) {
   return {
     id: o.shopify_order_id, // string id — used for POST /account/orders/:id/reorder
     order_number: o.order_number,
@@ -64,6 +91,8 @@ function shapeOrder(o) {
       quantity: li.quantity,
       price: money(li.price),
       is_custom_blend: li.blend_id != null,
+      // "Trace your tea": [{ bottle, of, url }], empty until the machine posts a link.
+      traces: traceMap.get(li.line_item_id) || [],
     })),
   };
 }
@@ -102,8 +131,12 @@ const getMyOrders = async (req, res) => {
     }),
   ]);
 
+  const traceMap = await traceLinksByLine(
+    rows.flatMap((o) => o.line_items.map((li) => li.line_item_id))
+  );
+
   return res.status(200).json({
-    orders: rows.map(shapeOrder),
+    orders: rows.map((o) => shapeOrder(o, traceMap)),
     count,
     has_more: offset + rows.length < count,
   });

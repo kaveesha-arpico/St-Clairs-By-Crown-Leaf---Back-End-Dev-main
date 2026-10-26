@@ -70,6 +70,7 @@ const ROUTES = [
   ["GET", "/api/machine/orders/pending"],
   ["GET", "/api/machine/orders/changes?since=2026-01-01T00:00:00.000Z"],
   ["POST", "/api/machine/orders/1/status"],
+  ["POST", "/api/machine/orders/1/traceability"],
   ["GET", "/api/machine/orders"], // legacy, still mounted until cutover
 ];
 
@@ -126,6 +127,15 @@ test("/:id/status with a non-numeric id -> 404 NOT_FOUND without a database", as
   const res = await request("POST", "/api/machine/orders/not-an-id/status", {
     key: "test-machine-key-1",
     body: { schema_version: 1, machine_status: "order_received" },
+  });
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.error_code, "NOT_FOUND");
+});
+
+test("/:id/traceability with a non-numeric id -> 404 NOT_FOUND without a database", async () => {
+  const res = await request("POST", "/api/machine/orders/not-an-id/traceability", {
+    key: "test-machine-key-1",
+    body: { schema_version: 1, unit_index: 1, trace_id: "7Kq2xM9a", url: "https://trace.crownandleaf.uk/t/7Kq2xM9a" },
   });
   assert.strictEqual(res.status, 404);
   assert.strictEqual(res.body.error_code, "NOT_FOUND");

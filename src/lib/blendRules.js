@@ -141,8 +141,62 @@ function validateBlend({ quantity, baseTeaPercentage, spices }) {
   };
 }
 
+/**
+ * Grams per ingredient for a recipe, against the finished pack weight `quantity`.
+ * `quantity` IS the finished pack; percentages are shares of it; the base tea
+ * takes whatever the spices leave. The base absorbs any rounding remainder, so
+ * the parts always sum to EXACTLY `quantity` — a 100 g pack is never 99.99 g or
+ * 125 g. Percentages may be strings ("10.00") or numbers.
+ *
+ * @returns {{packWeightG:number, baseTeaPercentage:string, baseGrams:number,
+ *            spiceTotalGrams:number, spices:Array<{grams:number}>}}
+ */
+function blendGrams({ quantity, baseTeaPercentage, spices }) {
+  const q = Number(quantity);
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const list = Array.isArray(spices) ? spices : [];
+
+  const spiceSumH = list.reduce((n, s) => n + toHundredths(s.percentage), 0);
+  const baseH =
+    baseTeaPercentage === undefined ||
+    baseTeaPercentage === null ||
+    baseTeaPercentage === ""
+      ? HUNDRED - spiceSumH
+      : toHundredths(baseTeaPercentage);
+
+  // Every component (base + each spice) rounded to 2 dp. Rounding can leave the
+  // parts a hundredth of a gram off `quantity`, so the leftover is pushed onto
+  // the LARGEST component — which keeps the parts summing to exactly `quantity`
+  // and never turns a value negative.
+  const components = [
+    { kind: "base", h: baseH },
+    ...list.map((s, i) => ({ kind: "spice", i, h: toHundredths(s.percentage) })),
+  ].map((c) => ({ ...c, raw: (q * c.h) / HUNDRED, grams: round2((q * c.h) / HUNDRED) }));
+
+  const delta = round2(q - components.reduce((n, c) => n + c.grams, 0));
+  if (delta !== 0) {
+    const largest = components.reduce((a, b) => (b.raw > a.raw ? b : a));
+    largest.grams = round2(largest.grams + delta);
+  }
+
+  const baseGrams = components.find((c) => c.kind === "base").grams;
+  const spiceOut = list.map((s, i) => ({
+    ...s,
+    grams: components.find((c) => c.kind === "spice" && c.i === i).grams,
+  }));
+  const spiceTotalGrams = round2(spiceOut.reduce((n, s) => n + s.grams, 0));
+  return {
+    packWeightG: q,
+    baseTeaPercentage: fromHundredths(baseH),
+    baseGrams,
+    spiceTotalGrams,
+    spices: spiceOut,
+  };
+}
+
 module.exports = {
   validateBlend,
+  blendGrams,
   toHundredths,
   fromHundredths,
   minIngredientG,

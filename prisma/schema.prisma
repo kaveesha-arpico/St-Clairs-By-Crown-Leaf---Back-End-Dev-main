@@ -289,6 +289,7 @@ model machine_orders {
   created_at                DateTime               @default(now()) @db.DateTime(3)
   updated_at                DateTime               @default(now()) @updatedAt @db.DateTime(3)
   events                    machine_order_events[]
+  traces                    machine_order_traces[]
 
   // /pending: paid, uncollected, valid, not test — ordered by paid_at, id.
   @@index([payment_status, machine_status, validation_error, is_test, paid_at, id], map: "ix_machine_orders_pending")
@@ -311,6 +312,28 @@ model machine_order_events {
   order            machine_orders @relation(fields: [machine_order_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_moe_order")
 
   @@index([machine_order_id, id], map: "ix_moe_order")
+}
+
+// One row per BOTTLE the machine made for a website order (Addendum 2 §4):
+// the trace link printed as the QR on that bottle's label. Written only by
+// POST /api/machine/orders/:id/traceability and never updated. trace_id is
+// case-sensitive, so the column uses a binary collation (set in the migration;
+// Prisma does not model collation).
+model machine_order_traces {
+  id               BigInt         @id @default(autoincrement())
+  machine_order_id BigInt
+  // 1..machine_orders.units
+  unit_index       Int
+  // 8–12 chars [A-Za-z0-9], random, unique across all bottles.
+  trace_id         String         @db.VarChar(12)
+  // https://, on a TRACE_URL_HOSTS host. Shown to the customer exactly as received.
+  url              String         @db.VarChar(255)
+  machine_ref      String?        @db.VarChar(64)
+  created_at       DateTime       @default(now()) @db.DateTime(3)
+  order            machine_orders @relation(fields: [machine_order_id], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_mot_order")
+
+  @@unique([machine_order_id, unit_index], map: "uq_mot_unit")
+  @@unique([trace_id], map: "uq_mot_trace")
 }
 
 model machine_order_statuses {

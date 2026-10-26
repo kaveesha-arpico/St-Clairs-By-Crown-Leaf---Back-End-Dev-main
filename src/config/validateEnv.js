@@ -32,6 +32,9 @@ const OPTIONAL = [
   "MACHINE_ALLOWED_IPS",
   // JOINT TEST ONLY: "true" lets test/UAT orders into /pending. Unset normally.
   "MACHINE_INCLUDE_TEST_ORDERS",
+  // Hosts a bottle trace link may point at (Addendum 2). The traceability
+  // endpoint rejects every link until this is set.
+  "TRACE_URL_HOSTS",
   // Smallest grams of any one ingredient the machine dispenses accurately.
   // Supplied by the machine team; 0 / unset disables the check.
   "BLEND_MIN_INGREDIENT_G",

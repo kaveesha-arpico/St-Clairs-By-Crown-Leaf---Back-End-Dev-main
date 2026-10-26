@@ -139,6 +139,13 @@ docker compose up -d
 > (This happened on 2026-10-16; the fix was simply to re-run migrate + seed
 > after the build.) `docker compose up -d --build` alone does NOT run
 > migrations.
+>
+> **After editing `.env`, run `docker compose up -d`, NOT `docker compose restart`.**
+> `restart` reuses the existing container with the environment it was created
+> with, so new or changed variables are silently ignored. `up -d` notices the
+> env change and recreates the container. (Bit us on 2026-10-16: the machine API
+> key was in `.env` but not in the running container.) Check with
+> `docker compose exec -T backend sh -c "echo $MACHINE_ALLOWED_IPS"`.
 
 ## Go-live checklist
 - [ ] `.env` complete, `NODE_ENV=production`, `chmod 600`, `DATABASE_URL` uses `@db`

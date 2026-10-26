@@ -1,5 +1,5 @@
 const prisma = require("../config/prisma");
-const { validateBlend } = require("../lib/blendRules");
+const { validateBlend, blendGrams } = require("../lib/blendRules");
 
 // Prisma returns DECIMAL(5,2) as a Decimal whose JSON form drops trailing zeros
 // ("75" for 75.00). Percentages are always presented with two decimals, which
@@ -136,6 +136,15 @@ const createCustomBlend = async (req, res) => {
       spices: result.spiceList,
     });
 
+    // Resolve the recipe into actual grams against the finished pack weight, so
+    // the frontend (and fulfillment) can show/verify "75 g Moray + 25 g spice"
+    // instead of re-deriving it from percentages. Base = quantity - total spice.
+    const g = blendGrams({
+      quantity: recipe.quantity,
+      baseTeaPercentage: recipe.baseTeaPercentage,
+      spices: result.spiceList,
+    });
+
     res.status(201).json({
       success: true,
       message: "Custom tea blend created successfully!",
@@ -146,6 +155,20 @@ const createCustomBlend = async (req, res) => {
         // Attach these to the Shopify cart line (POST /storefront/cart/lines)
         // so the recipe travels with the order.
         lineAttributes,
+        grams: {
+          pack_weight_g: g.packWeightG,
+          base: {
+            name: result.baseTeaName,
+            percentage: g.baseTeaPercentage,
+            grams: g.baseGrams,
+          },
+          spice_total_g: g.spiceTotalGrams,
+          spices: g.spices.map((s) => ({
+            name: s.name,
+            percentage: s.percentage,
+            grams: s.grams,
+          })),
+        },
       },
     });
   } catch (error) {
@@ -195,6 +218,20 @@ const getCustomBlend = async (req, res) => {
     return res.status(404).json({ success: false, message: "Blend not found." });
   }
 
+  const spices = blend.blend_spices.map((bs) => ({
+    code: bs.spices?.code || null,
+    name: bs.spices?.name || null,
+    percentage: pct(bs.percentage),
+  }));
+
+  // Resolve to grams against the finished pack weight. Base takes the remainder,
+  // so base + spices always equal exactly `quantity`.
+  const g = blendGrams({
+    quantity: blend.quantity,
+    baseTeaPercentage: blend.base_tea_percentage,
+    spices,
+  });
+
   return res.status(200).json({
     success: true,
     data: {
@@ -205,11 +242,23 @@ const getCustomBlend = async (req, res) => {
       baseTeaPercentage: pct(blend.base_tea_percentage),
       quantity: blend.quantity,
       createdAt: blend.created_at,
-      spices: blend.blend_spices.map((bs) => ({
-        code: bs.spices?.code || null,
-        name: bs.spices?.name || null,
-        percentage: pct(bs.percentage),
-      })),
+      spices,
+      grams: {
+        pack_weight_g: g.packWeightG,
+        base: {
+          name: blend.base_teas?.name || null,
+          code: blend.base_teas?.code || null,
+          percentage: g.baseTeaPercentage,
+          grams: g.baseGrams,
+        },
+        spice_total_g: g.spiceTotalGrams,
+        spices: g.spices.map((s) => ({
+          code: s.code,
+          name: s.name,
+          percentage: s.percentage,
+          grams: s.grams,
+        })),
+      },
     },
   });
 };

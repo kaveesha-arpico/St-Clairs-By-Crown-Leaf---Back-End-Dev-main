@@ -63,4 +63,18 @@ const machineLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === "test",
 });
 
-module.exports = { authLimiter, apiLimiter, contactLimiter, machineLimiter };
+// Guest order lookup: order numbers are sequential, so the (number, email)
+// pair must not be guessable at speed. A real customer needs one or two tries.
+const lookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // attempts per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many lookups. Please wait a few minutes and try again.",
+  },
+  skip: () => process.env.NODE_ENV === "test",
+});
+
+module.exports = { authLimiter, apiLimiter, contactLimiter, machineLimiter, lookupLimiter };

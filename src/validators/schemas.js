@@ -177,6 +177,16 @@ const teaBlend = {
   ],
 };
 
+// ---- Guest order lookup ----
+// Shape only. Whether the pair matches is decided in the controller, which
+// answers one identical 404 for every kind of miss.
+const orderLookup = {
+  lookup: [
+    body("order_number").isString().trim().notEmpty().withMessage("order_number is required"),
+    body("email").isEmail().withMessage("a valid email is required"),
+  ],
+};
+
 // ---- Shopify checkout ----
 const shopify = {
   checkout: [
@@ -194,6 +204,15 @@ const storefrontCart = {
     body("items").optional().isArray().withMessage("items must be an array"),
     body("items.*.variantId").notEmpty().withMessage("each item needs a variantId"),
     body("items.*.quantity").isInt({ min: 1 }).withMessage("each item quantity must be a positive integer"),
+    body("attributes").optional().isArray().withMessage("attributes must be an array"),
+    body("attributes.*.key").notEmpty().withMessage("each attribute needs a key"),
+    body("attributes.*.value").isString().withMessage("each attribute value must be a string"),
+  ],
+  attributes: [
+    body("cartId").notEmpty().withMessage("cartId is required"),
+    body("attributes").isArray().withMessage("attributes must be an array"),
+    body("attributes.*.key").notEmpty().withMessage("each attribute needs a key"),
+    body("attributes.*.value").isString().withMessage("each attribute value must be a string"),
   ],
   get: [
     query("id").notEmpty().withMessage("id (cart) is required"),
@@ -292,6 +311,7 @@ const admin = {
 };
 
 module.exports = {
+  orderLookup,
   idParam,
   auth,
   contact,

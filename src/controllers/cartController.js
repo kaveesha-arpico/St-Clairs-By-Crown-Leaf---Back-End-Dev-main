@@ -18,6 +18,7 @@ const CART_FIELDS = `
     id
     checkoutUrl
     totalQuantity
+    attributes { key value }
     cost {
       subtotalAmount { amount currencyCode }
       totalAmount { amount currencyCode }
@@ -98,6 +99,19 @@ const CART_LINES_REMOVE = `
   }
 `;
 
+// Cart-level attributes become the order's note_attributes on the webhook.
+// The UAT storefront uses this to mark its checkouts { source: "uat" } so the
+// tea machine never makes them (src/lib/machineOrderRules.js isTestOrder).
+const CART_ATTRIBUTES_UPDATE = `
+  ${CART_FIELDS}
+  mutation CartAttributesUpdate($cartId: ID!, $attributes: [AttributeInput!]!) {
+    cartAttributesUpdate(cartId: $cartId, attributes: $attributes) {
+      cart { ...CartFields }
+      userErrors { field message }
+    }
+  }
+`;
+
 const CART_BUYER_IDENTITY_UPDATE = `
   ${CART_FIELDS}
   mutation CartBuyerIdentityUpdate($cartId: ID!, $buyerIdentity: CartBuyerIdentityInput!) {
@@ -115,6 +129,9 @@ function shapeCart(cart) {
     id: cart.id,
     checkoutUrl: cart.checkoutUrl,
     totalQuantity: cart.totalQuantity,
+    // Cart-level attributes (not line attributes). Echoed so the storefront can
+    // verify e.g. the UAT { source: "uat" } marker is set.
+    attributes: cart.attributes || [],
     cost: cart.cost,
     lines: cart.lines.edges.map(({ node }) => ({
       id: node.id, // CartLine GID — required to update/remove this line
@@ -156,9 +173,11 @@ function sendCartResult(res, result, notFoundMessage) {
   return res.status(200).json({ success: true, cart: shapeCart(result.cart) });
 }
 
-// POST /api/storefront/cart — create a cart, optionally with initial items.
+// POST /api/storefront/cart — create a cart, optionally with initial items
+// and cart-level attributes.
 const createCart = async (req, res) => {
   const items = req.body.items || [];
+  const attributes = Array.isArray(req.body.attributes) ? req.body.attributes : undefined;
 
   if (items.length > 0) {
     const rejected = await rejectBadVariants(
@@ -177,11 +196,40 @@ const createCart = async (req, res) => {
 
   const data = await storefrontGraphQL(
     CART_CREATE,
-    { input: { lines } },
+    { input: { lines, ...(attributes ? { attributes } : {}) } },
     { buyerIp: req.ip }
   );
 
   return sendCartResult(res, data.cartCreate, "Failed to create cart.");
+};
+
+// POST /api/storefront/cart/attributes — set cart-level attributes. Replaces
+// the whole set (Shopify semantics), so send every attribute you want kept.
+const updateCartAttributes = async (req, res) => {
+  const { cartId, attributes } = req.body;
+
+  const data = await storefrontGraphQL(
+    CART_ATTRIBUTES_UPDATE,
+    { cartId, attributes },
+    { buyerIp: req.ip }
+  );
+
+  const result = data.cartAttributesUpdate;
+  const errors = result.userErrors || [];
+  if (errors.length > 0) {
+    const cartError = errors.some(
+      (e) => Array.isArray(e.field) && e.field.includes("cartId")
+    );
+    return res.status(cartError ? 404 : 400).json({
+      success: false,
+      message: cartError ? "Cart not found or expired." : "Failed to update cart attributes.",
+      errors,
+    });
+  }
+  if (!result.cart) {
+    return res.status(404).json({ success: false, message: "Cart not found or expired." });
+  }
+  return res.status(200).json({ success: true, cart: shapeCart(result.cart) });
 };
 
 // GET /api/storefront/cart?id=<cart gid> — read a cart back (survives reloads).
@@ -320,5 +368,6 @@ module.exports = {
   addCartLines,
   updateCartLines,
   removeCartLines,
+  updateCartAttributes,
   updateCartBuyerIdentity,
 };

@@ -103,7 +103,9 @@ Both are present on **every** item; on shelf products they are `null` / `[]`.
 
 **`blend_status`** — where the blend is in the tea machine. `null` until the shop's
 machine has seen the order (normally within a minute of payment), so render nothing
-for `null`, not "unknown". `stage` is one of exactly four values; `label` is a
+for `null`, not "unknown". It also stays `null` **forever** on a line the machine can
+never make (a line whose Blend ID is missing or unknown — staff follow those up), and
+on every shelf product. `stage` is one of exactly four values; `label` is a
 ready-made English string you may use or replace:
 
 | `stage` | `label` | Meaning |
@@ -134,12 +136,12 @@ times. A bottle without a link yet is simply absent — show nothing, not an err
 the recipe resolved against the pack weight, e.g. 37.5 g base + 10 g lemongrass +
 2.5 g rose petals = 50 g. Show those rather than re-deriving from percentages.
 
-### UAT checkouts must be tagged as test orders
+### UAT and local checkouts must be tagged as test orders
 
-The backend hides test orders from the tea machine. On the **UAT** build only, add a
-cart attribute at checkout — `{ key: "source", value: "uat" }` on the cart's
-`attributes` — so a UAT order is never made into real tea. Shopify's own test flag
-and an order tag of `test` also work; the cart attribute is the one the frontend owns.
+The backend hides test orders from the tea machine. On UAT **and localhost**, set
+the cart-level attribute `{ key: "source", value: "uat" }` via
+`POST /api/storefront/cart/attributes` (or on `POST /api/storefront/cart`) before
+checkout. Full details in `FRONTEND_CUSTOM_BLENDS.md` §4.
 
 ## 5. Reorder — `POST /api/account/orders/:id/reorder`  *(Bearer)*
 
@@ -184,6 +186,44 @@ Shopify's hosted checkout then opens with the email filled in.
   split; no extra work.
 
 ---
+
+## 7. Guest order tracking — `POST /api/orders/lookup`  *(public, no token)*
+
+For visitors without an account. The visitor proves they own the order by giving
+**both** its number and the email it was placed with.
+
+```json
+// body
+{ "order_number": "#1044", "email": "amal@example.com" }
+```
+- `order_number` with or without the leading `#`, spaces trimmed.
+- `email` matched case-insensitively.
+
+```json
+// 200 — exactly one order, same shape as an item of GET /api/account/orders
+{ "success": true, "order": { "id": "…", "order_number": "#1044", "placed_at": "…",
+    "financial_status": "paid", "fulfillment_status": null, "cancelled": false,
+    "currency": "GBP", "subtotal": "12.50", "total": "12.50", "item_count": 1,
+    "items": [ { "title": "Custom Blend Tea", "variant_title": "…", "sku": null,
+                 "quantity": 1, "price": "12.50", "is_custom_blend": true,
+                 "blend_status": { "stage": "ready", "label": "Ready", "updated_at": "…" },
+                 "traces": [ { "bottle": 1, "of": 1, "url": "https://trace.crownandleaf.uk/t/…" } ] } ]
+} }
+```
+- `items[].blend_status` and `traces` follow §4 exactly.
+- No email, name or address is in the response.
+
+```json
+// 404 — unknown number, wrong email, or any other miss: ALWAYS this one body
+{ "success": false, "message": "We couldn't find an order with that number and email." }
+```
+Render one "not found" state. Don't tell the user which half was wrong — the
+message is identical on purpose so the pair can't be probed.
+
+- `400` with `errors[]` only for a malformed body (missing field, invalid email).
+- `429` after 20 attempts per IP in 15 minutes: "please wait a few minutes".
+  A genuine customer never sees this; don't auto-retry.
+- This route needs no token even when the visitor happens to be signed in.
 
 ## Behaviour notes
 

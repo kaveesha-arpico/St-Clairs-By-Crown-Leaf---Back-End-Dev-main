@@ -1,5 +1,13 @@
 const prisma = require("../config/prisma");
-const { validateBlend, blendGrams } = require("../lib/blendRules");
+const {
+  validateBlend,
+  blendGrams,
+  minIngredientG,
+  MIN_WEIGHT_G,
+  MAX_WEIGHT_G,
+  MAX_SPICES,
+  PERCENT_DECIMALS,
+} = require("../lib/blendRules");
 
 // Prisma returns DECIMAL(5,2) as a Decimal whose JSON form drops trailing zeros
 // ("75" for 75.00). Percentages are always presented with two decimals, which
@@ -48,6 +56,16 @@ const getTeaOptions = async (req, res) => {
       data: {
         baseTeas,
         spices,
+        // The rules the server enforces on POST /create-custom-blend, so the
+        // builder can validate before sending and warn about the machine's
+        // minimum grams per ingredient (0 = check disabled).
+        limits: {
+          min_weight_g: MIN_WEIGHT_G,
+          max_weight_g: MAX_WEIGHT_G,
+          max_spices: MAX_SPICES,
+          percentage_decimals: PERCENT_DECIMALS,
+          min_ingredient_g: minIngredientG(),
+        },
       },
     });
   } catch (error) {

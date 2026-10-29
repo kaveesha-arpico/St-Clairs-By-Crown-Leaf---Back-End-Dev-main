@@ -94,6 +94,7 @@ const storefrontRoutes = require("./routes/storefrontRoutes"); // Storefront Gra
 const shopifyWebhookRoutes = require("./routes/shopifyWebhookRoutes"); // Shopify order webhooks
 const machineRoutes = require("./routes/machineRoutes"); // TeaMatrix order feed (own API key)
 const accountRoutes = require("./routes/accountRoutes"); // Signed-in customer account (orders)
+const orderLookupRoutes = require("./routes/orderLookupRoutes"); // Guest order tracking (public, rate-limited)
 const qrRoutes = require("./routes/qrRoutes"); // Traceability QR images (public, no DB lookup)
 const staffAuthRoutes = require("./routes/staffAuthRoutes"); // Admin-site staff login (public)
 const adminRoutes = require("./routes/adminRoutes"); // Traceability admin API (staff only)
@@ -128,6 +129,7 @@ app.use("/api", storefrontRoutes); // Storefront GraphQL catalog (products, cart
 app.use("/api", shopifyWebhookRoutes); // Shopify order webhooks (HMAC-verified)
 app.use("/api", qrRoutes); // Traceability QR images (public so <img> tags work)
 app.use("/api", staffAuthRoutes); // Staff login for the admin site (rate-limited)
+app.use("/api", orderLookupRoutes); // Guest order tracking by (order number, email), rate-limited
 
 // ---- AUTH GATE: every /api route below this line requires a valid JWT ----
 app.use("/api", protect);

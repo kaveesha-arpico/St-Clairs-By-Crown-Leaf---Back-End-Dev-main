@@ -11,6 +11,7 @@
 const MIN_WEIGHT_G = 1;
 const MAX_WEIGHT_G = 200; // raised from 100 in spec v1.1; the machine runs large blends in several passes
 const MAX_SPICES = 7;
+const PERCENT_DECIMALS = 2; // toHundredths() accepts at most this many decimal places
 const HUNDRED = 10000; // 100.00 in hundredths
 
 // Smallest amount of any one ingredient the machine can dispense accurately.
@@ -203,4 +204,5 @@ module.exports = {
   MIN_WEIGHT_G,
   MAX_WEIGHT_G,
   MAX_SPICES,
+  PERCENT_DECIMALS,
 };

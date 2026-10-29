@@ -130,6 +130,21 @@ test("bad :id param -> 400", async () => {
   assert.strictEqual(res.status, 400);
 });
 
+test("cart attributes: missing cartId / bad shape -> 400 before any Shopify call", async () => {
+  let res = await request("POST", "/api/storefront/cart/attributes", {
+    body: { attributes: [{ key: "source", value: "uat" }] },
+  });
+  assert.strictEqual(res.status, 400);
+  res = await request("POST", "/api/storefront/cart/attributes", {
+    body: { cartId: "gid://shopify/Cart/x", attributes: [{ key: "", value: "uat" }] },
+  });
+  assert.strictEqual(res.status, 400);
+  res = await request("POST", "/api/storefront/cart", {
+    body: { attributes: "not-an-array" },
+  });
+  assert.strictEqual(res.status, 400);
+});
+
 test("checkout with empty items -> 400", async () => {
   const res = await request("POST", "/api/checkout", { body: { items: [] } });
   assert.strictEqual(res.status, 400);

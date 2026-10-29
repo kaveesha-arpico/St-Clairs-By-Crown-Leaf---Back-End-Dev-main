@@ -6,6 +6,7 @@ const {
   addCartLines,
   updateCartLines,
   removeCartLines,
+  updateCartAttributes,
   updateCartBuyerIdentity,
 } = require("../controllers/cartController");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -45,6 +46,14 @@ router.delete(
   "/storefront/cart/lines",
   validate(storefrontCart.removeLines),
   asyncHandler(removeCartLines)
+);
+
+// Cart-level attributes (e.g. the UAT { source: "uat" } marker). Public, like
+// the other cart mutations: the cart id is the capability.
+router.post(
+  "/storefront/cart/attributes",
+  validate(storefrontCart.attributes),
+  asyncHandler(updateCartAttributes)
 );
 
 // The one shop-flow route that requires auth: attach the signed-in customer's

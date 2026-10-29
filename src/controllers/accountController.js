@@ -62,6 +62,7 @@ async function machineInfoByLine(lineItemIds) {
       payment_status: true,
       machine_status: true,
       machine_status_updated_at: true,
+      validation_error: true,
       traces: {
         select: { unit_index: true, url: true },
         orderBy: { unit_index: "asc" },
@@ -72,10 +73,16 @@ async function machineInfoByLine(lineItemIds) {
     rows.map((r) => [
       r.shopify_line_item_id,
       {
-        blend_status: {
-          ...blendStage(r),
-          updated_at: r.machine_status_updated_at,
-        },
+        // A line whose recipe could not be resolved (missing/unknown Blend ID,
+        // bad percentages) is never sent to the machine and needs staff
+        // follow-up. Showing "Order received" forever would mislead the
+        // customer, so such lines get no stage at all.
+        blend_status: r.validation_error
+          ? null
+          : {
+              ...blendStage(r),
+              updated_at: r.machine_status_updated_at,
+            },
         // One entry per bottle that HAS a link; a bottle without one is simply
         // absent (shows nothing, not an error).
         traces: r.traces.map((t) => ({ bottle: t.unit_index, of: r.units, url: t.url })),
@@ -294,4 +301,47 @@ const reorder = async (req, res) => {
   });
 };
 
-module.exports = { getMyOrders, reorder };
+// --- Guest order lookup ------------------------------------------------------
+// POST /api/orders/lookup { order_number, email } — public, no token.
+//
+// A guest proves they own an order by knowing BOTH its number and the email it
+// was placed with. Order numbers are sequential, so neither alone may reveal
+// anything: every failure (unknown number, wrong email, malformed pair) returns
+// the one same 404, and the route is rate-limited per IP (lookupLimiter) so the
+// pair cannot be brute-forced. The response is exactly one item in the same
+// shape as GET /api/account/orders, and like it carries no email or address.
+
+const LOOKUP_NOT_FOUND = "We couldn't find an order with that number and email.";
+
+// "#1042", "1042", " #1042 " -> ["#1042", "1042"]: Shopify's order name is
+// stored as sent (normally with the '#'), so match either spelling.
+function orderNumberCandidates(raw) {
+  const bare = String(raw || "").trim().replace(/^#+/, "");
+  if (!bare) return [];
+  return [`#${bare}`, bare];
+}
+
+const lookupOrder = async (req, res) => {
+  const candidates = orderNumberCandidates(req.body.order_number);
+  const email = String(req.body.email || "").trim().toLowerCase();
+  if (candidates.length === 0 || !email) {
+    return res.status(404).json({ success: false, message: LOOKUP_NOT_FOUND });
+  }
+
+  // Email column collation is case-insensitive, so equality already ignores
+  // case; lowercasing is belt and braces. Both conditions in ONE query so a
+  // right number with a wrong email never reaches a different code path.
+  const row = await prisma.shopify_orders.findFirst({
+    where: { order_number: { in: candidates }, email },
+    orderBy: { created_at: "desc" },
+    select: ORDER_SELECT,
+  });
+  if (!row) {
+    return res.status(404).json({ success: false, message: LOOKUP_NOT_FOUND });
+  }
+
+  const machineMap = await machineInfoByLine(row.line_items.map((li) => li.line_item_id));
+  return res.status(200).json({ success: true, order: shapeOrder(row, machineMap) });
+};
+
+module.exports = { getMyOrders, reorder, lookupOrder };

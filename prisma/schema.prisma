@@ -243,6 +243,26 @@ model shopify_orders {
   @@index([updated_at], map: "idx_shopify_orders_updated_at")
 }
 
+// Customer contact details for an order, delivered through the store-level
+// (Settings -> Notifications) webhooks. On the shop's current Shopify plan the
+// custom app is denied "protected customer data", so the app-route webhooks
+// that write shopify_orders arrive with email/customer stripped; the store-route
+// delivery still carries them. POST /api/webhooks/shopify/order-contact stores
+// them here and copies them onto the order. Kept as its own table so a note can
+// arrive BEFORE the order it belongs to and be picked up when the order lands.
+// Only email and the display name are stored: never address or phone.
+model shopify_order_contacts {
+  shopify_order_id      String    @id @db.VarChar(32)
+  email                 String?   @db.VarChar(255)
+  // Same shape as machine_orders.customer_display_name ("Amal P.").
+  customer_display_name String?   @db.VarChar(100)
+  // The order's updated_at from the payload, so an older redelivery never
+  // overwrites a newer note.
+  shopify_updated_at    DateTime? @db.DateTime(0)
+  received_at           DateTime  @default(now()) @db.DateTime(3)
+  updated_at            DateTime  @default(now()) @updatedAt @db.DateTime(3)
+}
+
 // Status reports the tea-dispensing machine writes back for an order (POST
 // /api/machine/orders/status). Append-only log: one row per (order, status), so
 // out-of-order arrivals and retries are naturally idempotent and no status ever

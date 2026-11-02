@@ -34,7 +34,10 @@ function blendIdProperty(item) {
  *
  * @param {import("@prisma/client").Prisma.TransactionClient} tx
  * @param {object} payload  the parsed Shopify order (ids as strings)
- * @param {{ now?: Date, log?: Console }} [opts]
+ * @param {{ now?: Date, log?: Console, contact?: { customer_display_name?: string|null }|null }} [opts]
+ *   contact: the order's drawer entry from the contact side channel, used for
+ *   the display name when the payload itself carries no customer (app-route
+ *   deliveries on a plan without protected customer data).
  */
 async function syncMachineOrders(tx, payload, opts = {}) {
   const productId = customBlendProductId();
@@ -103,7 +106,10 @@ async function syncMachineOrders(tx, payload, opts = {}) {
           order_number: payload.name ? String(payload.name).slice(0, 32) : null,
           blend_id: blendId,
           blend_ref: blendRefOut ? String(blendRefOut).slice(0, 32) : null,
-          customer_display_name: customerDisplayName(payload),
+          customer_display_name:
+            customerDisplayName(payload) ||
+            (opts.contact && opts.contact.customer_display_name) ||
+            null,
           units: Number.isInteger(item.quantity) && item.quantity > 0 ? item.quantity : 1,
           total_weight_g: totalWeightG,
           recipe_json: recipe,

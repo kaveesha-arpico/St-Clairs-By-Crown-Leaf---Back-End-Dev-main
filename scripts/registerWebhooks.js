@@ -27,8 +27,16 @@
 //                                                           create any missing topics
 //   node scripts/registerWebhooks.js --delete <gid>         remove one subscription
 //
-// Only subscriptions owned by THIS app are visible or deletable here; the old
+// Only subscriptions owned by THIS app are visible or deletable here; the
 // Notifications webhooks are managed in the admin UI.
+//
+// NOTE (2026-11-02): on the shop's current Shopify plan the app is denied
+// "protected customer data", so the subscriptions registered here deliver the
+// order WITHOUT email/customer/addresses. Email and the display name come in
+// through the store-level "Order creation" / "Order update" webhooks, added by
+// hand in Settings -> Notifications and pointed at
+// /api/webhooks/shopify/order-contact (SHOPIFY_CONTACT_WEBHOOK_SECRET). See
+// DEPLOY_VM107.md §6b and src/lib/orderContactStore.js.
 
 const { adminGraphQL, API_VERSION } = require("../src/lib/shopifyAdmin");
 

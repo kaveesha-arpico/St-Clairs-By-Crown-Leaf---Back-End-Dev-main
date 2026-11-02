@@ -1,12 +1,16 @@
 const express = require("express");
 const {
+  orderContact,
   ordersCreate,
   ordersPaid,
   ordersUpdated,
   ordersCancelled,
   ordersFulfilled,
 } = require("../controllers/shopifyWebhookController");
-const verifyShopifyWebhook = require("../middleware/verifyShopifyWebhook");
+const {
+  verifyShopifyWebhook,
+  verifyShopifyContactWebhook,
+} = require("../middleware/verifyShopifyWebhook");
 
 const router = express.Router();
 
@@ -42,6 +46,17 @@ router.post(
   "/webhooks/shopify/orders-fulfilled",
   verifyShopifyWebhook,
   ordersFulfilled
+);
+
+// Contact side channel. Store-level (Settings -> Notifications) webhooks for
+// "Order creation" and "Order update" point here, signed with the store's shared
+// secret (SHOPIFY_CONTACT_WEBHOOK_SECRET). That secret is NOT accepted on any
+// route above; this handler can only fill in a missing email / display name.
+// See src/lib/orderContactStore.js.
+router.post(
+  "/webhooks/shopify/order-contact",
+  verifyShopifyContactWebhook,
+  orderContact
 );
 
 module.exports = router;

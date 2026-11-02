@@ -76,13 +76,46 @@ The app already trusts the proxy (`trust proxy`), so it reads real client IPs.
 Then verify from outside: `curl https://api.crownandleaf.uk/health`.
 
 ## 6. Shopify webhooks (once the public URL is live)
-Register against the **production** store (matching `SHOPIFY_WEBHOOK_SECRET`):
+Two routes, two secrets, on purpose.
+
+**6a. Order webhooks — through the custom app** (signed with the app's API
+secret key = `SHOPIFY_WEBHOOK_SECRET`). Register them from the VM:
+```bash
+docker compose exec -T backend node scripts/registerWebhooks.js --list   # what the app owns
+docker compose exec -T backend node scripts/registerWebhooks.js          # create any missing
+```
 | Topic | URL |
 |---|---|
-| `orders/create` | `https://api.crownandleaf.uk/api/webhooks/shopify/orders-create` |
-| `orders/paid`   | `https://api.crownandleaf.uk/api/webhooks/shopify/orders-paid` |
+| `orders/create`    | `https://api.crownandleaf.uk/api/webhooks/shopify/orders-create` |
+| `orders/paid`      | `…/orders-paid` |
+| `orders/updated`   | `…/orders-updated` |
+| `orders/cancelled` | `…/orders-cancelled` |
+| `orders/fulfilled` | `…/orders-fulfilled` |
 
-Then place one real test order and confirm it lands in `shopify_orders`.
+**6b. Contact side channel — through Settings -> Notifications -> Webhooks**
+(signed with the store's shared secret = `SHOPIFY_CONTACT_WEBHOOK_SECRET`).
+Needed because on the current Shopify plan the app is denied protected customer
+data, so 6a deliveries carry no email/customer. Add by hand in the admin UI:
+| Event | URL |
+|---|---|
+| Order creation | `https://api.crownandleaf.uk/api/webhooks/shopify/order-contact` |
+| Order update   | same URL |
+
+Format JSON, latest stable API version. The signing secret is shown at the
+bottom of that page once a webhook exists; it goes in `.env` as
+`SHOPIFY_CONTACT_WEBHOOK_SECRET`, then `docker compose up -d`. This route can only
+fill a missing email / display name (src/lib/orderContactStore.js). If the plan
+is ever upgraded and "Protected customer data access" is granted to the app,
+delete these two webhooks and the variable.
+
+Then place one test order and confirm it lands in `shopify_orders` **with an
+email**:
+```bash
+docker compose exec -T db mariadb -u root -p"$DB_ROOT_PASSWORD" "$DB_NAME" \
+  -e "SELECT order_number, email FROM shopify_orders ORDER BY created_at DESC LIMIT 3;"
+```
+To repair an order that arrived without an email, add any tag to it in Shopify
+admin: that fires Order update on both routes and the email fills in.
 
 ## 7. Backups (do not skip)
 Trace codes live ONLY in this database — Shopify can't rebuild them, so a lost

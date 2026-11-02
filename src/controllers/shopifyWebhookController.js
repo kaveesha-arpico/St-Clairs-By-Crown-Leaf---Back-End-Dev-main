@@ -13,6 +13,12 @@ const prisma = require("../config/prisma");
 const { normalizeCartToken } = require("../lib/cartToken");
 const { ensureTraceCode, markDispatched } = require("../lib/traceCodeStore");
 const { syncMachineOrders } = require("../lib/machineOrderStore");
+const {
+  applyOrderContact,
+  findOrderContact,
+  fillOrderFromContact,
+  normalizeEmail,
+} = require("../lib/orderContactStore");
 
 // Parse the webhook body from the RAW bytes with a bigint-aware parser. Express's
 // global express.json() already parsed req.body with plain JSON.parse, which
@@ -82,12 +88,17 @@ function extractDispatchedAt(payload) {
 // Write the order and its line items. Upsert throughout: orders/create,
 // orders/paid and orders/updated all carry the full order, and any may arrive
 // first, out of order, or twice — the last write wins and bumps updated_at.
+//
+// Email is the exception to "last write wins". App-route deliveries arrive
+// with it stripped (protected customer data, see orderContactStore.js), so a
+// missing email must never erase one we already have: when the payload has no
+// email we take it from the contact drawer if present, and otherwise leave the
+// column alone on update.
 async function persistOrder(payload) {
   const orderId = String(payload.id);
 
   const orderData = {
     order_number: payload.name ?? null,
-    email: payload.email ?? null,
     financial_status: payload.financial_status ?? null,
     fulfillment_status: payload.fulfillment_status ?? null,
     currency: payload.currency ?? null,
@@ -106,11 +117,17 @@ async function persistOrder(payload) {
   const hasLineItems = Array.isArray(payload.line_items);
   const lineItems = hasLineItems ? payload.line_items : [];
 
+  const payloadEmail = normalizeEmail(payload.email);
+  let contact = null;
+
   await prisma.$transaction(async (tx) => {
+    contact = payloadEmail ? null : await findOrderContact(tx, orderId);
+    const email = payloadEmail || (contact && contact.email) || null;
+
     await tx.shopify_orders.upsert({
       where: { shopify_order_id: orderId },
-      update: orderData,
-      create: { shopify_order_id: orderId, ...orderData },
+      update: email ? { ...orderData, email } : orderData,
+      create: { shopify_order_id: orderId, email, ...orderData },
     });
 
     // Remove lines that are no longer on the order. An order edit that drops an
@@ -153,9 +170,19 @@ async function persistOrder(payload) {
     // Skipped when the payload carries no line_items (a partial body), since
     // there is nothing to derive a blend from.
     if (hasLineItems) {
-      await syncMachineOrders(tx, payload);
+      await syncMachineOrders(tx, payload, { contact });
     }
   });
+
+  // Close the small window where the contact delivery landed between our
+  // drawer read above and the commit: re-read it and fill anything still
+  // empty. Update-only, so this is harmless when nothing changed.
+  if (!payloadEmail) {
+    const late = await findOrderContact(prisma, orderId);
+    if (late) {
+      await fillOrderFromContact(prisma, { shopify_order_id: orderId, ...late });
+    }
+  }
 }
 
 /**
@@ -287,7 +314,26 @@ const ordersFulfilled = makeWebhookHandler("orders/fulfilled", async (payload) =
   await markDispatched(payload.id, extractDispatchedAt(payload));
 });
 
+// POST /api/webhooks/shopify/order-contact
+// The contact side channel: store-route (Settings -> Notifications) deliveries
+// of orders/create and orders/updated, signed with the store's shared secret
+// and verified by verifyShopifyContactWebhook, NOT the app secret. Allowed to
+// record the order's email and display name and nothing else — see
+// orderContactStore.js for the full list of what it must never do. An order
+// that is not here yet is not created; the note waits in the drawer until the
+// app-route delivery writes the order.
+const orderContact = makeWebhookHandler("orders/contact", async (payload) => {
+  const result = await prisma.$transaction((tx) => applyOrderContact(tx, payload));
+  if (result.stored) {
+    console.log(
+      `[order-contact] order ${payload.name || payload.id}: email ${result.orders ? "filled" : "held"}, ` +
+        `${result.machineRows} machine row(s) named`
+    );
+  }
+});
+
 module.exports = {
+  orderContact,
   ordersCreate,
   ordersPaid,
   ordersUpdated,
